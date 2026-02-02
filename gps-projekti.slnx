@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gps.Cli/Gps.Cli.csproj" />
+    <Project Path="src/Gps.Core/Gps.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Gps.Core.Tests/Gps.Core.Tests.csproj" />
+  </Folder>
+</Solution>

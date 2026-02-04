@@ -1,7 +1,12 @@
 <Solution>
+  <Folder Name="/data/" />
+  <Folder Name="/data/samples/">
+    <File Path="track.csv" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Gps.Cli/Gps.Cli.csproj" />
     <Project Path="src/Gps.Core/Gps.Core.csproj" />
+    <Project Path="src/Gps.Ui.Wpf/Gps.Ui.Wpf.csproj" Id="57395e2b-1c82-42a7-8d57-5cb429067011" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Gps.Core.Tests/Gps.Core.Tests.csproj" />

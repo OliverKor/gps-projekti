@@ -1,0 +1,31 @@
+﻿<Window x:Class="Gps.Ui.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="GPS Track" Height="450" Width="800">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="220"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="Status" FontSize="16"/>
+
+        <Canvas x:Name="MapCanvas" Grid.Row="1" Margin="0,10,0,10" Background="#111"/>
+
+        <ListView x:Name="Fixes" Grid.Row="2">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="180"/>
+                    <GridViewColumn Header="Lat" DisplayMemberBinding="{Binding LatitudeDeg}" Width="120"/>
+                    <GridViewColumn Header="Lon" DisplayMemberBinding="{Binding LongitudeDeg}" Width="120"/>
+                    <GridViewColumn Header="Speed" DisplayMemberBinding="{Binding SpeedMps}" Width="80"/>
+                    <GridViewColumn Header="SV" DisplayMemberBinding="{Binding NumSv}" Width="50"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </Grid>
+</Window>

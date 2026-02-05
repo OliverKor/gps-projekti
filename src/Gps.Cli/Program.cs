@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Ports;
 
 // Graceful shutdown on Ctrl+C using CancellationTokenSource
@@ -60,39 +61,39 @@ Console.WriteLine($"Debug complete: {totalDebug} bytes in {loopsDebug} loops.\n"
 // ===== Step 2: UBX Frame Parser with NAV-PVT Decoding (Continuous) =====
 Console.WriteLine("=== Starting UBX frame parser (continuous mode) ===");
 
-var buffer = new List<byte>(8192);
+var buffer = new RingBuffer(8192);
 int validFrames = 0;
 int readLoops = 0;
 var lastSyncMsg = DateTime.MinValue;
-var lastBufferingMsg = DateTime.MinValue;
 
-// CSV logging setup
+// CSV logging setup with StreamWriter
 var csvPath = "track.csv";
 DateTimeOffset? lastLoggedTimestamp = null;
 
 // Create CSV with header if it doesn't exist
-if (!File.Exists(csvPath))
+var fileExists = File.Exists(csvPath);
+var csvWriter = new StreamWriter(csvPath, append: true) { AutoFlush = true };
+
+if (!fileExists)
 {
-    File.WriteAllText(csvPath, "timestamp,lat,lon,speed_mps,num_sv,fix_type\n");
+    csvWriter.WriteLine("timestamp,lat,lon,speed_mps,num_sv,fix_type");
     Console.WriteLine($"Created {csvPath}");
 }
 
 var inv = CultureInfo.InvariantCulture;
 
+// Reusable read buffer (avoid allocation per iteration)
+var readBuf = new byte[1024];
+
 // Outer loop: keep reading from serial port continuously
 while (!cts.IsCancellationRequested)
 {
     // Read more data from serial port
-    var readBuf = new byte[1024];
-    int n;
+    int n = 0;
     try
     {
         n = sp.Read(readBuf, 0, readBuf.Length);
-        // Add to buffer
-        for (int i = 0; i < n; i++)
-        {
-            buffer.Add(readBuf[i]);
-        }
+        buffer.Write(readBuf, 0, n);
         readLoops++;
     }
     catch (TimeoutException)
@@ -109,221 +110,187 @@ while (!cts.IsCancellationRequested)
     {
         extractIterations++;
         madeProgress = false;
-        int initialBufferSize = buffer.Count;
         
         // Need at least 2 bytes to look for sync
-        if (buffer.Count < 2)
+        if (buffer.Available < 2)
         {
             break; // Need more data from serial port
         }
         
         // Search for sync bytes 0xB5 0x62
-        int syncIndex = -1;
-        for (int i = 0; i <= buffer.Count - 2; i++)
-        {
-            if (buffer[i] == 0xB5 && buffer[i + 1] == 0x62)
-            {
-                syncIndex = i;
-                break;
-            }
-        }
+        int syncIndex = buffer.FindSync();
         
         if (syncIndex == -1)
         {
             // No sync found - discard all but last byte (might be partial 0xB5)
-            if ((DateTime.Now - lastBufferingMsg).TotalSeconds >= 1.0 && buffer.Count > 100)
+            int toDiscard = Math.Max(0, buffer.Available - 1);
+            if (toDiscard > 0)
             {
-                Console.WriteLine($"no sync yet, buffering ... ({buffer.Count} bytes)");
-                lastBufferingMsg = DateTime.Now;
-            }
-            
-            if (buffer.Count > 1)
-            {
-                buffer.RemoveRange(0, buffer.Count - 1);
+                buffer.Consume(toDiscard);
                 madeProgress = true;
             }
             break; // Need more data
         }
         
         // Sync found at syncIndex
-        // Need at least: sync(2) + class(1) + id(1) + length(2) = 6 bytes
-        if (buffer.Count < syncIndex + 6)
+        // Discard any junk before sync
+        if (syncIndex > 0)
         {
-            // Not enough bytes for header - discard bytes before sync and wait for more
+            buffer.Consume(syncIndex);
+            madeProgress = true;
+            continue; // Re-check from beginning
+        }
+        
+        // Sync is at position 0
+        // Need at least: sync(2) + class(1) + id(1) + length(2) = 6 bytes
+        if (buffer.Available < 6)
+        {
+            // Not enough bytes for header - wait for more
             if ((DateTime.Now - lastSyncMsg).TotalSeconds >= 1.0)
             {
-                Console.WriteLine($"SYNC found at {syncIndex}, waiting for more bytes...");
+                Console.WriteLine($"SYNC found, waiting for header... ({buffer.Available} bytes available)");
                 lastSyncMsg = DateTime.Now;
-            }
-            
-            if (syncIndex > 0)
-            {
-                buffer.RemoveRange(0, syncIndex);
-                madeProgress = true;
             }
             break; // Need more data
         }
         
         // Read header
-        byte cls = buffer[syncIndex + 2];
-        byte id = buffer[syncIndex + 3];
-        int payloadLen = buffer[syncIndex + 4] | (buffer[syncIndex + 5] << 8); // little-endian
+        byte cls = buffer.PeekByte(2);
+        byte id = buffer.PeekByte(3);
+        int payloadLen = buffer.PeekByte(4) | (buffer.PeekByte(5) << 8); // little-endian
         
         // Sanity check on payload length
         if (payloadLen > 4096)
         {
             // Invalid length, likely false sync - discard sync bytes (2 bytes) and continue
-            buffer.RemoveRange(0, syncIndex + 2);
+            buffer.Consume(2);
             madeProgress = true;
             continue;
         }
         
         // Calculate total frame length: sync(2) + class(1) + id(1) + len(2) + payload + checksum(2)
-        int frameLen = 2 + 4 + payloadLen + 2; // = payloadLen + 8
+        int frameLen = 8 + payloadLen;
         
-        if (buffer.Count < syncIndex + frameLen)
+        if (buffer.Available < frameLen)
         {
-            // Not enough bytes for complete frame - discard bytes before sync and wait
+            // Not enough bytes for complete frame - wait
             if ((DateTime.Now - lastSyncMsg).TotalSeconds >= 1.0)
             {
-                Console.WriteLine($"SYNC found at {syncIndex}, waiting for more bytes... (need {frameLen}, have {buffer.Count - syncIndex})");
+                Console.WriteLine($"SYNC found, waiting for frame... (need {frameLen}, have {buffer.Available})");
                 lastSyncMsg = DateTime.Now;
-            }
-            
-            if (syncIndex > 0)
-            {
-                buffer.RemoveRange(0, syncIndex);
-                madeProgress = true;
             }
             break; // Need more data
         }
         
         // We have a complete frame - validate checksum
         // Checksum is computed over: class, id, length(2 bytes), payload
-        // That's bytes from syncIndex+2 to syncIndex+5+payloadLen
         byte ckA = 0, ckB = 0;
-        for (int i = syncIndex + 2; i < syncIndex + 6 + payloadLen; i++)
+        for (int i = 2; i < 6 + payloadLen; i++)
         {
-            ckA += buffer[i];
+            byte b = buffer.PeekByte(i);
+            ckA += b;
             ckB += ckA;
         }
         
-        byte expectedCkA = buffer[syncIndex + 6 + payloadLen];
-        byte expectedCkB = buffer[syncIndex + 6 + payloadLen + 1];
+        byte expectedCkA = buffer.PeekByte(6 + payloadLen);
+        byte expectedCkB = buffer.PeekByte(6 + payloadLen + 1);
         
-        if (ckA == expectedCkA && ckB == expectedCkB)
-        {
-            // Valid frame!
-            validFrames++;
-            
-            // Check if this is NAV-PVT (cls=0x01, id=0x07, len=92)
-            if (cls == 0x01 && id == 0x07 && payloadLen == 92)
-            {
-                // Extract payload
-                var payload = new byte[payloadLen];
-                for (int i = 0; i < payloadLen; i++)
-                {
-                    payload[i] = buffer[syncIndex + 6 + i];
-                }
-                
-                // Try to decode NAV-PVT
-                if (TryDecodeNavPvt(payload, out var pvt))
-                {
-                    // Rate limit: only log if timestamp is different from last logged (1 Hz throttle)
-                    if (lastLoggedTimestamp == null || pvt.Timestamp != lastLoggedTimestamp)
-                    {
-                        lastLoggedTimestamp = pvt.Timestamp;
-                        
-                        // Write to CSV with InvariantCulture (uses '.' decimal separator)
-                        var csvLine = string.Format(inv,
-                            "{0},{1:F7},{2:F7},{3:F2},{4},{5}\n",
-                            pvt.Timestamp.ToString("o"),
-                            pvt.LatitudeDeg,
-                            pvt.LongitudeDeg,
-                            pvt.SpeedMps,
-                            pvt.NumSv,
-                            pvt.FixType);
-                        
-                        File.AppendAllText(csvPath, csvLine);
-                        
-                        // Print console log with InvariantCulture
-                        Console.WriteLine(string.Format(inv,
-                            "LOG {0} lat={1:F6} lon={2:F6} speed={3:F2} sv={4} fix={5}",
-                            pvt.Timestamp.ToString("o"),
-                            pvt.LatitudeDeg,
-                            pvt.LongitudeDeg,
-                            pvt.SpeedMps,
-                            pvt.NumSv,
-                            pvt.FixType));
-                    }
-                }
-            }
-            
-            // Discard this frame (including any junk before sync)
-            buffer.RemoveRange(0, syncIndex + frameLen);
-            madeProgress = true;
-        }
-        else
+        if (ckA != expectedCkA || ckB != expectedCkB)
         {
             // Checksum failed - discard only the sync bytes (2 bytes) and continue scanning
-            buffer.RemoveRange(0, syncIndex + 2);
+            buffer.Consume(2);
             madeProgress = true;
+            continue;
         }
         
-        // Safety check: did we make progress?
-        if (buffer.Count >= initialBufferSize)
+        // Valid frame!
+        validFrames++;
+        
+        // Check if this is NAV-PVT (cls=0x01, id=0x07, len=92)
+        if (cls == 0x01 && id == 0x07 && payloadLen == 92)
         {
-            // No progress made - this shouldn't happen, but break to avoid infinite loop
-            Console.WriteLine($"WARNING: No buffer reduction in iteration {extractIterations}");
-            break;
+            // Decode NAV-PVT directly from buffer at offset 6 (payload starts after header)
+            if (TryDecodeNavPvt(buffer, 6, out var pvt))
+            {
+                // Rate limit: only log if timestamp is different from last logged (1 Hz throttle)
+                if (lastLoggedTimestamp == null || pvt.Timestamp != lastLoggedTimestamp)
+                {
+                    lastLoggedTimestamp = pvt.Timestamp;
+                    
+                    // Write to CSV with InvariantCulture (uses '.' decimal separator)
+                    csvWriter.WriteLine(string.Format(inv,
+                        "{0},{1:F7},{2:F7},{3:F2},{4},{5}",
+                        pvt.Timestamp.ToString("o"),
+                        pvt.LatitudeDeg,
+                        pvt.LongitudeDeg,
+                        pvt.SpeedMps,
+                        pvt.NumSv,
+                        pvt.FixType));
+                    
+                    // Print console log with InvariantCulture
+                    Console.WriteLine(string.Format(inv,
+                        "LOG {0} lat={1:F6} lon={2:F6} speed={3:F2} sv={4} fix={5}",
+                        pvt.Timestamp.ToString("o"),
+                        pvt.LatitudeDeg,
+                        pvt.LongitudeDeg,
+                        pvt.SpeedMps,
+                        pvt.NumSv,
+                        pvt.FixType));
+                }
+            }
         }
+        
+        // Discard this frame
+        buffer.Consume(frameLen);
+        madeProgress = true;
     }
     
-    // Safety: if we looped too many times without finding valid frames, clear buffer
+    // Safety: if we looped too many times, clear buffer
     if (extractIterations >= 1000)
     {
-        Console.WriteLine($"WARNING: Extraction loop hit 1000 iterations without progress. Clearing buffer ({buffer.Count} bytes).");
+        Console.WriteLine($"WARNING: Extraction loop hit 1000 iterations. Clearing buffer ({buffer.Available} bytes).");
         buffer.Clear();
     }
-    
-    // Safety: prevent buffer from growing too large
-    if (buffer.Count > 16384)
-    {
-        Console.WriteLine($"WARNING: Buffer too large ({buffer.Count} bytes). Clearing old data.");
-        // Keep only the last 8KB
-        buffer.RemoveRange(0, buffer.Count - 8192);
-    }
 }
+
+// Flush and close CSV writer
+csvWriter.Flush();
+csvWriter.Close();
 
 Console.WriteLine($"\nStopped. Parsed {validFrames} valid UBX frames in {readLoops} read loops.");
 
 // ===== Helper Methods =====
 
-static bool TryDecodeNavPvt(ReadOnlySpan<byte> payload, out NavPvt pvt)
+static bool TryDecodeNavPvt(RingBuffer buffer, int offset, out NavPvt pvt)
 {
     pvt = default;
     
-    if (payload.Length != 92)
+    // NAV-PVT payload is 92 bytes
+    // To use BinaryPrimitives, we need contiguous memory
+    // Copy the 92-byte payload to a temp buffer
+    Span<byte> payload = stackalloc byte[92];
+    for (int i = 0; i < 92; i++)
     {
-        return false;
+        payload[i] = buffer.PeekByte(offset + i);
     }
     
     // Read time fields
-    ushort year = (ushort)(payload[4] | (payload[5] << 8));
+    ushort year = BinaryPrimitives.ReadUInt16LittleEndian(payload.Slice(4, 2));
     byte month = payload[6];
     byte day = payload[7];
     byte hour = payload[8];
     byte min = payload[9];
     byte sec = payload[10];
     
-    // Check valid flags (bit 0 = validDate, bit 1 = validTime)
+    // Check valid flags (bit 0 = validDate, bit 1 = validTime, bit 2 = fullyResolved)
     byte valid = payload[11];
     bool validDate = (valid & 0x01) != 0;
     bool validTime = (valid & 0x02) != 0;
+    bool fullyResolved = (valid & 0x04) != 0;
     
-    if (!validDate || !validTime)
+    if (!validDate || !validTime || !fullyResolved)
     {
-        return false; // Invalid date/time
+        return false; // Invalid or not fully resolved date/time
     }
     
     // Construct timestamp (UTC)
@@ -354,15 +321,15 @@ static bool TryDecodeNavPvt(ReadOnlySpan<byte> payload, out NavPvt pvt)
     pvt.NumSv = payload[23];
     
     // Read lon (I4 at offset 24, little-endian, 1e-7 degrees)
-    int lonRaw = payload[24] | (payload[25] << 8) | (payload[26] << 16) | (payload[27] << 24);
+    int lonRaw = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(24, 4));
     pvt.LongitudeDeg = lonRaw / 1e7;
     
     // Read lat (I4 at offset 28, little-endian, 1e-7 degrees)
-    int latRaw = payload[28] | (payload[29] << 8) | (payload[30] << 16) | (payload[31] << 24);
+    int latRaw = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(28, 4));
     pvt.LatitudeDeg = latRaw / 1e7;
     
     // Read gSpeed (I4 at offset 60, little-endian, mm/s)
-    int gSpeedRaw = payload[60] | (payload[61] << 8) | (payload[62] << 16) | (payload[63] << 24);
+    int gSpeedRaw = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(60, 4));
     pvt.SpeedMps = gSpeedRaw / 1000.0;
     
     return true;
@@ -378,4 +345,77 @@ struct NavPvt
     public double SpeedMps { get; set; }
     public int NumSv { get; set; }
     public string FixType { get; set; }
+}
+
+// ===== Ring Buffer Implementation =====
+
+class RingBuffer
+{
+    private readonly byte[] _buffer;
+    private int _start;
+    private int _count;
+    
+    public RingBuffer(int capacity)
+    {
+        _buffer = new byte[capacity];
+        _start = 0;
+        _count = 0;
+    }
+    
+    public int Available => _count;
+    
+    public void Write(byte[] data, int offset, int length)
+    {
+        if (length > _buffer.Length - _count)
+        {
+            // Not enough space - this shouldn't happen with proper buffer sizing
+            // For safety, clear old data to make room
+            int toRemove = length - (_buffer.Length - _count);
+            Consume(toRemove);
+        }
+        
+        for (int i = 0; i < length; i++)
+        {
+            int pos = (_start + _count) % _buffer.Length;
+            _buffer[pos] = data[offset + i];
+            _count++;
+        }
+    }
+    
+    public byte PeekByte(int index)
+    {
+        if (index >= _count)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        
+        int pos = (_start + index) % _buffer.Length;
+        return _buffer[pos];
+    }
+    
+    public void Consume(int count)
+    {
+        if (count > _count)
+            count = _count;
+        
+        _start = (_start + count) % _buffer.Length;
+        _count -= count;
+    }
+    
+    public int FindSync()
+    {
+        // Search for 0xB5 0x62
+        for (int i = 0; i < _count - 1; i++)
+        {
+            if (PeekByte(i) == 0xB5 && PeekByte(i + 1) == 0x62)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+    
+    public void Clear()
+    {
+        _start = 0;
+        _count = 0;
+    }
 }

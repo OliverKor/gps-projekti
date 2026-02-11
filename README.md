@@ -9,8 +9,6 @@ This repository now focuses on a single runtime app:
 - **Gps.Ui.Wpf**: Live serial reader + map/table UI
 - **Gps.Core**: UBX parser/decoder and CSV utilities used by the UI
 
-`Gps.Cli` remains in the repository as legacy code, but it is not part of the solution build or supported runtime flow.
-
 ## Features
 
 - Live UBX stream parsing from serial (`0xB5 0x62` sync, checksum validation, resync on noise)
@@ -60,7 +58,6 @@ gps-projekti/
   src/
     Gps.Core/        # UBX parsing + NAV-PVT decoding + CSV read/write
     Gps.Ui.Wpf/      # Live serial session + WPF UI
-    Gps.Cli/         # Legacy reader (de-scoped from solution)
   tests/
     Gps.Core.Tests/  # Parser/decoder/CSV tests
 ```

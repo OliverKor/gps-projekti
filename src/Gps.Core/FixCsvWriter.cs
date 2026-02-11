@@ -16,10 +16,10 @@ public sealed class FixCsvWriter : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var fileExists = File.Exists(path);
+        var writeHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
         _writer = new StreamWriter(path, append: true) { AutoFlush = true };
 
-        if (!fileExists)
+        if (writeHeader)
         {
             _writer.WriteLine("timestamp,lat,lon,speed_mps,num_sv,fix_type,lat_m,lon_m");
         }

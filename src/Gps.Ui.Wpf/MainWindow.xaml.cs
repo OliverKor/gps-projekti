@@ -1,5 +1,6 @@
 using Gps.Core;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.IO.Ports;
 using System.Windows;
 using System.Windows.Media;

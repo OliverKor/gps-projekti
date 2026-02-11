@@ -1,11 +1,8 @@
-﻿using Gps.Core;
-using System;
+using Gps.Core;
 using System.IO;
 using System.Windows;
-using System.Windows.Shapes;
 using System.Windows.Media;
-using System.Linq;
-using static System.Net.WebRequestMethods;
+using System.Windows.Shapes;
 
 namespace Gps.Ui.Wpf;
 
@@ -16,52 +13,70 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Loaded += (_, _) => LoadAndRender();
+    }
 
-        var repoRoot = FindRepoRoot();
-        var csvPath = System.IO.Path.Combine(repoRoot, "track.csv"); // nyt repojuuressa
-
-        _fixes = System.IO.File.Exists(csvPath)
-            ? CsvFixReader.Read(csvPath)
-            : Array.Empty<Fix>();
-
-        Status.Text = System.IO.File.Exists(csvPath)
-            ? $"Loaded {_fixes.Count} fixes from {csvPath}"
-            : $"CSV not found: {csvPath}";
-
-        Fixes.ItemsSource = _fixes;
-        
-        Loaded += (s, e) => 
+    private void LoadAndRender()
+    {
+        var csvPath = System.IO.Path.Combine(FindRepoRoot(), "track.csv");
+        if (!File.Exists(csvPath))
         {
-            MapCanvas.SizeChanged += (sc, se) => DrawTrack();
-            DrawTrack();
-        };
+            Status.Text = $"CSV not found: {csvPath}";
+            Fixes.ItemsSource = null;
+            MapCanvas.Children.Clear();
+            return;
+        }
+
+        _fixes = CsvFixReader.Read(csvPath);
+        Fixes.ItemsSource = _fixes;
+        Status.Text = $"Loaded {_fixes.Count} fixes from {csvPath}";
+
+        MapCanvas.SizeChanged -= OnMapCanvasSizeChanged;
+        MapCanvas.SizeChanged += OnMapCanvasSizeChanged;
+
+        DrawTrack();
+    }
+
+    private void OnMapCanvasSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        DrawTrack();
     }
 
     private void DrawTrack()
     {
         MapCanvas.Children.Clear();
 
-        // Edge case: less than 2 points or no canvas size
         if (_fixes.Count < 2 || MapCanvas.ActualWidth <= 0 || MapCanvas.ActualHeight <= 0)
+        {
             return;
+        }
 
-        double minLon = _fixes.Min(f => f.LongitudeDeg);
-        double maxLon = _fixes.Max(f => f.LongitudeDeg);
-        double minLat = _fixes.Min(f => f.LatitudeDeg);
-        double maxLat = _fixes.Max(f => f.LatitudeDeg);
+        var minLon = _fixes[0].LongitudeDeg;
+        var maxLon = _fixes[0].LongitudeDeg;
+        var minLat = _fixes[0].LatitudeDeg;
+        var maxLat = _fixes[0].LatitudeDeg;
 
-        double lonSpan = maxLon - minLon;
-        double latSpan = maxLat - minLat;
+        for (var i = 1; i < _fixes.Count; i++)
+        {
+            var fix = _fixes[i];
+            if (fix.LongitudeDeg < minLon) minLon = fix.LongitudeDeg;
+            if (fix.LongitudeDeg > maxLon) maxLon = fix.LongitudeDeg;
+            if (fix.LatitudeDeg < minLat) minLat = fix.LatitudeDeg;
+            if (fix.LatitudeDeg > maxLat) maxLat = fix.LatitudeDeg;
+        }
 
-        // Edge case: zero span (all points at same location)
-        if (lonSpan == 0 || latSpan == 0)
+        var lonSpan = maxLon - minLon;
+        var latSpan = maxLat - minLat;
+        if (lonSpan <= 0 || latSpan <= 0)
+        {
             return;
+        }
 
-        const double pad = 10;
-        double canvasWidth = MapCanvas.ActualWidth;
-        double canvasHeight = MapCanvas.ActualHeight;
+        const double padding = 10;
+        var drawWidth = MapCanvas.ActualWidth - (2 * padding);
+        var drawHeight = MapCanvas.ActualHeight - (2 * padding);
 
-        var polyline = new Polyline
+        var path = new Polyline
         {
             Stroke = Brushes.Lime,
             StrokeThickness = 2
@@ -69,26 +84,28 @@ public partial class MainWindow : Window
 
         foreach (var fix in _fixes)
         {
-            double x = (fix.LongitudeDeg - minLon) / lonSpan * (canvasWidth - 2 * pad) + pad;
-            double y = (maxLat - fix.LatitudeDeg) / latSpan * (canvasHeight - 2 * pad) + pad;
-            polyline.Points.Add(new Point(x, y));
+            var x = ((fix.LongitudeDeg - minLon) / lonSpan) * drawWidth + padding;
+            var y = ((maxLat - fix.LatitudeDeg) / latSpan) * drawHeight + padding;
+            path.Points.Add(new Point(x, y));
         }
 
-        MapCanvas.Children.Add(polyline);
+        MapCanvas.Children.Add(path);
     }
 
     private static string FindRepoRoot()
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
 
-        while (dir != null)
+        while (directory is not null)
         {
-            if (System.IO.File.Exists(System.IO.Path.Combine(dir.FullName, "gps-projekti.slnx")) ||
-                Directory.Exists(System.IO.Path.Combine(dir.FullName, ".git")))
+            var hasSolution = File.Exists(System.IO.Path.Combine(directory.FullName, "gps-projekti.slnx"));
+            var hasGitDirectory = Directory.Exists(System.IO.Path.Combine(directory.FullName, ".git"));
+            if (hasSolution || hasGitDirectory)
             {
-                return dir.FullName;
+                return directory.FullName;
             }
-            dir = dir.Parent;
+
+            directory = directory.Parent;
         }
 
         return AppContext.BaseDirectory;

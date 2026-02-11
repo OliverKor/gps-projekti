@@ -1,7 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
 namespace Gps.Core;
 
 public sealed record Fix(
@@ -10,5 +6,7 @@ public sealed record Fix(
     double LongitudeDeg,
     double? SpeedMps = null,
     int? NumSv = null,
-    string? FixType = null
+    string? FixType = null,
+    double? LatitudeMeters = null,
+    double? LongitudeMeters = null
 );

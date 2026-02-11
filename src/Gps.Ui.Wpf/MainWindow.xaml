@@ -1,23 +1,59 @@
 <Window x:Class="Gps.Ui.Wpf.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="GPS Track"
-        Height="650"
-        Width="1000"
-        MinHeight="520"
-        MinWidth="760">
+        Title="Live GPS Track"
+        Height="700"
+        Width="1100"
+        MinHeight="560"
+        MinWidth="900">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="280" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="300" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Port" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="PortCombo"
+                      Width="140"
+                      Margin="0,0,8,0" />
+            <Button x:Name="RefreshPortsButton"
+                    Content="Refresh Ports"
+                    Width="105"
+                    Margin="0,0,14,0"
+                    Click="RefreshPortsButton_OnClick" />
+
+            <TextBlock Text="Baud" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="BaudRateCombo"
+                      Width="110"
+                      Margin="0,0,14,0" />
+
+            <CheckBox x:Name="LogToCsvCheckBox"
+                      Content="Log to CSV (track.csv)"
+                      VerticalAlignment="Center"
+                      Margin="0,0,14,0"
+                      IsChecked="False" />
+
+            <Button x:Name="ConnectButton"
+                    Content="Connect"
+                    Width="90"
+                    Margin="0,0,8,0"
+                    Click="ConnectButton_OnClick" />
+
+            <Button x:Name="DisconnectButton"
+                    Content="Disconnect"
+                    Width="95"
+                    Click="DisconnectButton_OnClick" />
+        </StackPanel>
+
         <TextBlock x:Name="Status"
-                   FontSize="16"
+                   Grid.Row="1"
+                   FontSize="15"
                    Margin="0,0,0,10" />
 
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 BorderBrush="#222"
                 BorderThickness="1"
                 Background="#111"
@@ -25,17 +61,17 @@
             <Canvas x:Name="MapCanvas" />
         </Border>
 
-        <ListView x:Name="Fixes" Grid.Row="2">
+        <ListView x:Name="Fixes" Grid.Row="3">
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="220" />
+                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="230" />
                     <GridViewColumn Header="Lat" DisplayMemberBinding="{Binding LatitudeDeg}" Width="120" />
                     <GridViewColumn Header="Lat m" DisplayMemberBinding="{Binding LatitudeMeters}" Width="90" />
                     <GridViewColumn Header="Lon" DisplayMemberBinding="{Binding LongitudeDeg}" Width="120" />
                     <GridViewColumn Header="Lon m" DisplayMemberBinding="{Binding LongitudeMeters}" Width="90" />
-                    <GridViewColumn Header="Speed" DisplayMemberBinding="{Binding SpeedMps}" Width="80" />
+                    <GridViewColumn Header="Speed m/s" DisplayMemberBinding="{Binding SpeedMps}" Width="95" />
                     <GridViewColumn Header="SV" DisplayMemberBinding="{Binding NumSv}" Width="50" />
-                    <GridViewColumn Header="Fix" DisplayMemberBinding="{Binding FixType}" Width="90" />
+                    <GridViewColumn Header="Fix" DisplayMemberBinding="{Binding FixType}" Width="95" />
                 </GridView>
             </ListView.View>
         </ListView>

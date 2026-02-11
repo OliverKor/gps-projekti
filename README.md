@@ -1,242 +1,103 @@
 # GPS Project (gps-projekti)
 
-A .NET 10 application suite for reading, parsing, and visualizing GPS data from u-blox GNSS receivers via serial port.
+Live WPF application for reading UBX binary GNSS data from serial devices and visualizing position updates in real time.
 
 ## Overview
 
-This project consists of multiple components:
+This repository now focuses on a single runtime app:
 
-- **Gps.Cli**: Console application that reads UBX binary protocol from a u-blox GNSS receiver (COM3), decodes NAV-PVT messages, and writes CSV output
-- **Gps.Core**: Core library with GPS data structures and parsers (CSV reader for track data)
-- **Gps.Ui.Wpf**: WPF user interface for visualizing GPS tracks from CSV files
+- **Gps.Ui.Wpf**: Live serial reader + map/table UI
+- **Gps.Core**: UBX parser/decoder and CSV utilities used by the UI
+
+`Gps.Cli` remains in the repository as legacy code, but it is not part of the solution build or supported runtime flow.
 
 ## Features
 
-### Gps.Cli - Serial GPS Reader
-
-- **Robust UBX framing**: Scans byte stream for UBX sync pattern (0xB5 0x62) with safe resynchronization
-- **Checksum validation**: 8-bit Fletcher algorithm (CK_A/CK_B) validation for data integrity
-- **Mixed protocol handling**: Tolerates arbitrary interleaving of ASCII NMEA and binary UBX data
-- **NAV-PVT decoding**: Extracts position, velocity, time, and satellite information from u-blox receivers
-- **CSV logging**: Writes GPS samples to `track.csv` with proper ISO 8601 formatting
-- **Rate limiting**: 1 Hz throttling via timestamp deduplication
-- **Continuous operation**: Runs until Ctrl+C with graceful shutdown
-- **Proper locale handling**: Uses InvariantCulture for CSV (decimal separator: '.')
-
-### CSV Format
-
-Output file: `track.csv`
-
-```csv
-timestamp,lat,lon,speed_mps,num_sv,fix_type
-2026-02-04T14:15:06.0000000+00:00,62.7905840,22.8185170,0.05,6,3D
-```
-
-**Fields:**
-- `timestamp`: ISO 8601 with UTC offset (format "o")
-- `lat`: Latitude in decimal degrees (F7 format)
-- `lon`: Longitude in decimal degrees (F7 format)
-- `speed_mps`: Ground speed in m/s (F2 format)
-- `num_sv`: Number of satellites used
-- `fix_type`: Fix type (NoFix, DR, 2D, 3D, GNSS+DR, TimeOnly)
+- Live UBX stream parsing from serial (`0xB5 0x62` sync, checksum validation, resync on noise)
+- NAV-PVT decoding (class `0x01`, id `0x07`, payload `92`)
+- Real-time map and fix table updates in WPF
+- Connect/Disconnect controls with runtime COM port and baud selection
+- Optional CSV logging (`track.csv`), default OFF
+- In-memory history cap of 5000 fixes for stable long sessions
+- Strict timestamp validity checks (`validDate`, `validTime`, `fullyResolved`)
 
 ## Requirements
 
-### Hardware
+- Windows
+- .NET 10 SDK
+- u-blox (or compatible) GNSS receiver exposed as a serial COM port
 
-- u-blox GNSS receiver connected to Windows via serial port (default: COM3)
-- Baud rate: 38400 (configurable via command-line arguments)
-
-### Software
-
-- .NET 10 SDK or runtime
-- Windows (SerialPort.Read uses Windows-specific I/O)
-
-## Getting Started
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/OliverKor/gps-projekti
-cd gps-projekti
-```
-
-### Build
-
-```bash
-dotnet build
-```
-
-### Run Gps.Cli
-
-```bash
-# Use default COM3 @ 38400 baud
-dotnet run --project src/Gps.Cli/Gps.Cli.csproj
-
-# Or specify custom port and baud rate
-dotnet run --project src/Gps.Cli/Gps.Cli.csproj -- COM4 115200
-```
-
-**Output:**
-- Console logs show live GPS samples (1 Hz max)
-- CSV file `track.csv` is created/updated in the current directory
-- Press Ctrl+C to stop
-
-Example console output:
-```
-Opening COM3 @ 38400 ...
-Opened.
-Press Ctrl+C to stop...
-
-=== Debug: Reading bytes to confirm data flow ===
-read 256 bytes (total 256)
-read 128 bytes (total 384)
-...
-Debug complete: 50000 bytes in 200 loops.
-
-=== Starting UBX frame parser (continuous mode) ===
-LOG 2026-02-04T14:15:06.0000000+00:00 lat=62.790584 lon=22.818517 speed=0.05 sv=6 fix=3D
-LOG 2026-02-04T14:15:07.0000000+00:00 lat=62.790590 lon=22.818520 speed=0.06 sv=6 fix=3D
-...
-^C
-Ctrl+C detected, stopping...
-
-Stopped. Parsed 1250 valid UBX frames in 1500 read loops.
-```
-
-### Run Gps.Ui.Wpf
+## Run
 
 ```bash
 dotnet run --project src/Gps.Ui.Wpf/Gps.Ui.Wpf.csproj
 ```
 
-Opens a WPF window to visualize GPS tracks from `track.csv`.
+## WPF Usage
+
+1. Start app.
+2. Select COM port and baud rate.
+3. Optionally check `Log to CSV (track.csv)`.
+4. Click `Connect`.
+5. Watch live fixes on map + table.
+6. Click `Disconnect` to stop session.
+
+CSV logging toggle is disabled while connected to keep behavior deterministic.
+
+## CSV Output
+
+When logging is enabled, rows are appended to `track.csv` in the app base directory:
+
+```csv
+timestamp,lat,lon,speed_mps,num_sv,fix_type,lat_m,lon_m
+2026-02-11T12:00:00.0000000+00:00,62.7905840,22.8185170,0.05,6,3D,0.00,0.00
+```
 
 ## Project Structure
 
-```
+```text
 gps-projekti/
-??? global.json              # .NET version specification
-??? README.md               # This file
-??? track.csv               # Generated GPS track data (CSV)
-??? src/
-?   ??? Gps.Cli/            # Console GPS reader application
-?   ?   ??? Program.cs      # Serial port reader, UBX parser, NAV-PVT decoder
-?   ?   ??? Gps.Cli.csproj
-?   ??? Gps.Core/           # Shared library
-?   ?   ??? CsvFixReader.cs # CSV parser for track data
-?   ?   ??? Gps.Core.csproj
-?   ??? Gps.Ui.Wpf/         # WPF user interface
-?       ??? MainWindow.xaml(.cs)
-?       ??? Gps.Ui.Wpf.csproj
-??? .gitignore
+  src/
+    Gps.Core/        # UBX parsing + NAV-PVT decoding + CSV read/write
+    Gps.Ui.Wpf/      # Live serial session + WPF UI
+    Gps.Cli/         # Legacy reader (de-scoped from solution)
+  tests/
+    Gps.Core.Tests/  # Parser/decoder/CSV tests
 ```
-
-## Technical Details
-
-### UBX Protocol Parsing
-
-The Gps.Cli parser:
-
-1. **Buffers incoming bytes** from SerialPort.Read (non-blocking with 500ms timeout)
-2. **Scans for sync bytes** (0xB5 0x62) in the accumulating buffer
-3. **Reads frame header**: class (1 byte), ID (1 byte), payload length (2 bytes, little-endian)
-4. **Waits for complete frame**: class + ID + length + payload + checksum (2 bytes)
-5. **Validates checksum**: 8-bit Fletcher algorithm over class, ID, length, and payload
-6. **On checksum fail**: Resyncs by discarding only the sync bytes (2 bytes) and continues scanning
-7. **On success**: Extracts payload, decodes if NAV-PVT (cls=0x01, id=0x07, len=92), and logs to CSV
-
-**Progress guarantees**: Every iteration either removes bytes from buffer or breaks to read more data, preventing infinite loops.
-
-### NAV-PVT Decoding
-
-Extracts from UBX NAV-PVT v1 payload (92 bytes):
-
-| Field | Offset | Type | Description |
-|-------|--------|------|-------------|
-| year | 4 | U2 | Year (e.g., 2026) |
-| month | 6 | U1 | Month (1-12) |
-| day | 7 | U1 | Day (1-31) |
-| hour | 8 | U1 | Hour (0-23) |
-| min | 9 | U1 | Minute (0-59) |
-| sec | 10 | U1 | Second (0-59) |
-| valid | 11 | U1 | Validity flags (bit0=validDate, bit1=validTime) |
-| fixType | 20 | U1 | Fix type (0=NoFix, 1=DR, 2=2D, 3=3D, 4=GNSS+DR, 5=TimeOnly) |
-| numSV | 23 | U1 | Number of satellites |
-| lon | 24 | I4 | Longitude (1e-7 degrees, little-endian) |
-| lat | 28 | I4 | Latitude (1e-7 degrees, little-endian) |
-| gSpeed | 60 | I4 | Ground speed (mm/s, little-endian) |
-
-Only samples with both `validDate` and `validTime` flags set are logged.
-
-### SerialPort Configuration
-
-```csharp
-ReadTimeout = 500       // ms - prevents hanging on timeouts
-WriteTimeout = 500      // ms
-DtrEnable = true        // Data Terminal Ready (enables many USB-serial adapters)
-Handshake = None        // No flow control
-```
-
-### Rate Limiting
-
-CSV output is throttled to **1 Hz** by comparing NAV-PVT timestamps:
-- Only writes a line if the timestamp differs from the previous logged timestamp
-- Prevents duplicate samples and keeps CSV files manageable
 
 ## Troubleshooting
 
-### Program hangs on startup
+### No serial ports found
 
-- Check SerialPort is configured with `ReadTimeout = 500ms` and `DtrEnable = true`
-- Verify COM port exists and device is connected
-- Try a different COM port: `dotnet run --project src/Gps.Cli/Gps.Cli.csproj -- COM4 38400`
+- Confirm GNSS receiver is connected.
+- Click `Refresh Ports`.
+- Check Windows Device Manager for COM assignment.
 
-### No GPS samples appear
+### Failed to open serial port
 
-- Check device is transmitting UBX frames (use a serial terminal to inspect raw bytes)
-- Verify NAV-PVT is enabled on the u-blox receiver
-- Check `validDate` and `validTime` flags in the NAV-PVT payload (parsing only logs valid timestamps)
+- Port may be busy (another app is using it).
+- Verify port name and baud rate.
+- Reconnect the USB serial device and retry.
 
-### CSV has comma decimal separators instead of periods
+### No live fixes despite connected state
 
-- Ensure code uses `CultureInfo.InvariantCulture` for all numeric formatting
-- This is already fixed in the current version
+- Ensure device outputs UBX NAV-PVT messages.
+- Mixed NMEA + UBX is supported, but only valid NAV-PVT fixes are displayed.
+- Samples with unresolved GNSS date/time are intentionally skipped.
 
-### track.csv is empty or missing
+### CSV not created
 
-- Ensure Gps.Cli has write permission to the directory where it's run
-- Check console output for LOG messages (if none appear, no valid NAV-PVT samples were decoded)
+- Enable `Log to CSV (track.csv)` before connecting.
+- Check app directory write permissions.
 
-## Development Notes
+## Testing
 
-### Adding Support for Other UBX Messages
+Run all solution tests:
 
-1. Add message ID constants (cls, id)
-2. Extend the frame detection in the parser main loop
-3. Implement a `TryDecodeXxxMessage()` method similar to `TryDecodeNavPvt()`
-4. Add CSV field mappings and output
-
-### Testing with Simulated Data
-
-To test without hardware, create a mock serial port or load test data into `track.csv` directly.
-
-## License
-
-MIT (or specify your license)
+```bash
+dotnet test gps-projekti.sln
+```
 
 ## Repository
 
-- **GitHub**: https://github.com/OliverKor/gps-projekti
-- **Branch**: master
-- **.NET Target**: .NET 10
-
-## Author
-
-Oliver Kor
-
----
-
-**Last Updated**: 2026-02-04
-
-For issues or contributions, visit the GitHub repository.
+- GitHub: https://github.com/OliverKor/gps-projekti

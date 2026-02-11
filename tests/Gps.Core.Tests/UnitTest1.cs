@@ -69,6 +69,57 @@ public class CsvFixReaderTests
         }
     }
 
+    [Fact]
+    public void FixCsvWriter_RoundTrips_WithComputedMeters()
+    {
+        var path = Path.GetTempFileName();
+
+        try
+        {
+            using (var writer = new FixCsvWriter(path))
+            {
+                writer.Write(new Fix(
+                    new DateTimeOffset(2026, 2, 4, 14, 15, 6, TimeSpan.Zero),
+                    62.7905840,
+                    22.8185170,
+                    0.05,
+                    6,
+                    "3D"));
+
+                writer.Write(new Fix(
+                    new DateTimeOffset(2026, 2, 4, 14, 15, 7, TimeSpan.Zero),
+                    62.7905900,
+                    22.8185200,
+                    null,
+                    null,
+                    null));
+            }
+
+            var fixes = CsvFixReader.Read(path);
+
+            Assert.Equal(2, fixes.Count);
+            Assert.Equal(0.05, fixes[0].SpeedMps);
+            Assert.Equal(6, fixes[0].NumSv);
+            Assert.Equal("3D", fixes[0].FixType);
+
+            Assert.NotNull(fixes[0].LatitudeMeters);
+            Assert.NotNull(fixes[0].LongitudeMeters);
+            Assert.Equal(0.0, fixes[0].LatitudeMeters!.Value, 2);
+            Assert.Equal(0.0, fixes[0].LongitudeMeters!.Value, 2);
+
+            Assert.Null(fixes[1].SpeedMps);
+            Assert.Null(fixes[1].NumSv);
+            Assert.Null(fixes[1].FixType);
+            Assert.NotNull(fixes[1].LatitudeMeters);
+            Assert.NotNull(fixes[1].LongitudeMeters);
+            Assert.NotEqual(0.0, fixes[1].LatitudeMeters!.Value);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static string CreateTempCsv(string content)
     {
         var path = Path.GetTempFileName();

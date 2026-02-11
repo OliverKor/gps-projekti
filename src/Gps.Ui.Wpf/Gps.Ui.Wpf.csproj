@@ -12,4 +12,8 @@
     <ProjectReference Include="..\Gps.Core\Gps.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" Version="10.0.2" />
+  </ItemGroup>
+
 </Project>

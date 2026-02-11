@@ -111,7 +111,7 @@ public partial class MainWindow : Window
         }
 
         var logToCsv = LogToCsvCheckBox.IsChecked == true;
-        var csvPath = Path.Combine(AppContext.BaseDirectory, "track.csv");
+        var csvPath = System.IO.Path.Combine(AppContext.BaseDirectory, "track.csv");
 
         var session = new LiveGpsSession(portName, baudRate, logToCsv, csvPath);
         session.FixReceived += OnFixReceived;

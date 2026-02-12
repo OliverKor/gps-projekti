@@ -86,6 +86,9 @@ internal sealed class LiveGpsSession : IDisposable
 
         if (readTask is null)
         {
+            // Startup can fail before the read task is created.
+            // Ensure any partially created resources are still released.
+            CleanupResources();
             return;
         }
 

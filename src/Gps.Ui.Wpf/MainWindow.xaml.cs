@@ -11,10 +11,18 @@ namespace Gps.Ui.Wpf;
 public partial class MainWindow : Window
 {
     private const int MaxFixCount = 5000;
+    private const double MapPadding = 10;
+    private const double MinimumAxisSpanMeters = 0.01;
+    private const double StartMarkerDiameter = 8;
+    private const double LatestMarkerDiameter = 10;
     private static readonly int[] BaudRateOptions = [9600, 19200, 38400, 57600, 115200];
     private readonly ObservableCollection<Fix> _fixes = [];
     private LiveGpsSession? _session;
     private bool _isConnected;
+    private bool _allowWindowClose;
+    private int _lastPlottedPointCount;
+    private double _lastSpanXmeters;
+    private double _lastSpanYmeters;
 
     public MainWindow()
     {
@@ -50,7 +58,20 @@ public partial class MainWindow : Window
 
     private async void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        if (_allowWindowClose)
+        {
+            return;
+        }
+
+        if (_session is null)
+        {
+            return;
+        }
+
+        e.Cancel = true;
         await StopSessionAsync();
+        _allowWindowClose = true;
+        Close();
     }
 
     private void RefreshPortsButton_OnClick(object sender, RoutedEventArgs e)
@@ -179,7 +200,8 @@ public partial class MainWindow : Window
             }
 
             DrawTrack();
-            Status.Text = $"Connected. Last fix {fix.Timestamp:o}. Total fixes: {_fixes.Count}.";
+            Status.Text = $"Connected. Last fix {fix.Timestamp:o}. Total fixes: {_fixes.Count}. " +
+                          $"Map points: {_lastPlottedPointCount}. Span: {_lastSpanXmeters:F1} m x {_lastSpanYmeters:F1} m.";
         });
     }
 
@@ -220,36 +242,64 @@ public partial class MainWindow : Window
     private void DrawTrack()
     {
         MapCanvas.Children.Clear();
+        _lastPlottedPointCount = 0;
+        _lastSpanXmeters = 0;
+        _lastSpanYmeters = 0;
 
-        if (_fixes.Count < 2 || MapCanvas.ActualWidth <= 0 || MapCanvas.ActualHeight <= 0)
+        if (MapCanvas.ActualWidth <= 0 || MapCanvas.ActualHeight <= 0)
         {
             return;
         }
 
-        var minLon = _fixes[0].LongitudeDeg;
-        var maxLon = _fixes[0].LongitudeDeg;
-        var minLat = _fixes[0].LatitudeDeg;
-        var maxLat = _fixes[0].LatitudeDeg;
-
-        for (var i = 1; i < _fixes.Count; i++)
-        {
-            var fix = _fixes[i];
-            if (fix.LongitudeDeg < minLon) minLon = fix.LongitudeDeg;
-            if (fix.LongitudeDeg > maxLon) maxLon = fix.LongitudeDeg;
-            if (fix.LatitudeDeg < minLat) minLat = fix.LatitudeDeg;
-            if (fix.LatitudeDeg > maxLat) maxLat = fix.LatitudeDeg;
-        }
-
-        var lonSpan = maxLon - minLon;
-        var latSpan = maxLat - minLat;
-        if (lonSpan <= 0 || latSpan <= 0)
+        var plottedFixes = CollectPlottedFixes();
+        if (plottedFixes.Count == 0)
         {
             return;
         }
 
-        const double padding = 10;
-        var drawWidth = MapCanvas.ActualWidth - (2 * padding);
-        var drawHeight = MapCanvas.ActualHeight - (2 * padding);
+        _lastPlottedPointCount = plottedFixes.Count;
+
+        if (plottedFixes.Count == 1)
+        {
+            var center = new Point(MapCanvas.ActualWidth / 2.0, MapCanvas.ActualHeight / 2.0);
+            AddMarker(center, LatestMarkerDiameter, Brushes.DeepSkyBlue, Brushes.White);
+            return;
+        }
+
+        var drawWidth = MapCanvas.ActualWidth - (2 * MapPadding);
+        var drawHeight = MapCanvas.ActualHeight - (2 * MapPadding);
+        if (drawWidth <= 0 || drawHeight <= 0)
+        {
+            return;
+        }
+
+        var minX = plottedFixes[0].XMeters;
+        var maxX = plottedFixes[0].XMeters;
+        var minY = plottedFixes[0].YMeters;
+        var maxY = plottedFixes[0].YMeters;
+
+        for (var i = 1; i < plottedFixes.Count; i++)
+        {
+            var plottedFix = plottedFixes[i];
+            if (plottedFix.XMeters < minX) minX = plottedFix.XMeters;
+            if (plottedFix.XMeters > maxX) maxX = plottedFix.XMeters;
+            if (plottedFix.YMeters < minY) minY = plottedFix.YMeters;
+            if (plottedFix.YMeters > maxY) maxY = plottedFix.YMeters;
+        }
+
+        _lastSpanXmeters = maxX - minX;
+        _lastSpanYmeters = maxY - minY;
+
+        var xSpan = Math.Max(_lastSpanXmeters, MinimumAxisSpanMeters);
+        var ySpan = Math.Max(_lastSpanYmeters, MinimumAxisSpanMeters);
+        var scaleX = drawWidth / xSpan;
+        var scaleY = drawHeight / ySpan;
+        var scale = Math.Min(scaleX, scaleY);
+
+        var scaledWidth = xSpan * scale;
+        var scaledHeight = ySpan * scale;
+        var offsetX = MapPadding + ((drawWidth - scaledWidth) / 2.0);
+        var offsetY = MapPadding + ((drawHeight - scaledHeight) / 2.0);
 
         var path = new Polyline
         {
@@ -257,13 +307,55 @@ public partial class MainWindow : Window
             StrokeThickness = 2
         };
 
-        foreach (var fix in _fixes)
+        foreach (var plottedFix in plottedFixes)
         {
-            var x = ((fix.LongitudeDeg - minLon) / lonSpan) * drawWidth + padding;
-            var y = ((maxLat - fix.LatitudeDeg) / latSpan) * drawHeight + padding;
+            var x = ((plottedFix.XMeters - minX) * scale) + offsetX;
+            var y = ((maxY - plottedFix.YMeters) * scale) + offsetY;
             path.Points.Add(new Point(x, y));
         }
 
         MapCanvas.Children.Add(path);
+
+        if (path.Points.Count == 0)
+        {
+            return;
+        }
+
+        AddMarker(path.Points[0], StartMarkerDiameter, Brushes.Gold, Brushes.Black);
+        AddMarker(path.Points[^1], LatestMarkerDiameter, Brushes.DeepSkyBlue, Brushes.White);
     }
+
+    private List<PlottedFix> CollectPlottedFixes()
+    {
+        var plottedFixes = new List<PlottedFix>(_fixes.Count);
+        foreach (var fix in _fixes)
+        {
+            if (!fix.LongitudeMeters.HasValue || !fix.LatitudeMeters.HasValue)
+            {
+                continue;
+            }
+
+            plottedFixes.Add(new PlottedFix(fix.LongitudeMeters.Value, fix.LatitudeMeters.Value));
+        }
+
+        return plottedFixes;
+    }
+
+    private void AddMarker(Point point, double diameter, Brush fill, Brush stroke)
+    {
+        var marker = new Ellipse
+        {
+            Width = diameter,
+            Height = diameter,
+            Fill = fill,
+            Stroke = stroke,
+            StrokeThickness = 1.5
+        };
+
+        System.Windows.Controls.Canvas.SetLeft(marker, point.X - (diameter / 2.0));
+        System.Windows.Controls.Canvas.SetTop(marker, point.Y - (diameter / 2.0));
+        MapCanvas.Children.Add(marker);
+    }
+
+    private readonly record struct PlottedFix(double XMeters, double YMeters);
 }

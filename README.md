@@ -13,7 +13,7 @@ This repository now focuses on a single runtime app:
 
 - Live UBX stream parsing from serial (`0xB5 0x62` sync, checksum validation, resync on noise)
 - NAV-PVT decoding (class `0x01`, id `0x07`, payload `92`)
-- Real-time map and fix table updates in WPF
+- Real-time local XY map (meter-projected from lat/lon) and fix table updates in WPF
 - Connect/Disconnect controls with runtime COM port and baud selection
 - Optional CSV logging (`track.csv`), default OFF
 - In-memory history cap of 5000 fixes for stable long sessions
@@ -41,6 +41,8 @@ dotnet run --project src/Gps.Ui.Wpf/Gps.Ui.Wpf.csproj
 6. Click `Disconnect` to stop session.
 
 CSV logging toggle is disabled while connected to keep behavior deterministic.
+
+The map is a local meter-projected track view rendered on a WPF canvas. It is not a street/tile basemap.
 
 ## CSV Output
 

@@ -2,17 +2,14 @@ namespace Gps.Core;
 
 public sealed class UbxNavPvtStreamDecoder
 {
-    private const double MetersPerLatitudeDegree = 111_132.92;
-    private const double MetersPerLongitudeDegreeAtEquator = 111_320.0;
-
     private readonly UbxStreamParser _parser;
+    private readonly LocalMetersProjector _projector;
     private DateTimeOffset? _lastTimestamp;
-    private double? _originLatitudeDeg;
-    private double? _originLongitudeDeg;
 
     public UbxNavPvtStreamDecoder(int capacity = 8192)
     {
         _parser = new UbxStreamParser(capacity);
+        _projector = new LocalMetersProjector();
     }
 
     public bool TryAppend(ReadOnlySpan<byte> bytes, ICollection<Fix> output)
@@ -40,12 +37,7 @@ public sealed class UbxNavPvtStreamDecoder
             }
 
             _lastTimestamp = fix.Timestamp;
-            _originLatitudeDeg ??= fix.LatitudeDeg;
-            _originLongitudeDeg ??= fix.LongitudeDeg;
-
-            var latitudeMeters = (fix.LatitudeDeg - _originLatitudeDeg.Value) * MetersPerLatitudeDegree;
-            var cosLat0 = Math.Cos(_originLatitudeDeg.Value * (Math.PI / 180.0));
-            var longitudeMeters = (fix.LongitudeDeg - _originLongitudeDeg.Value) * MetersPerLongitudeDegreeAtEquator * cosLat0;
+            var (latitudeMeters, longitudeMeters) = _projector.Project(fix.LatitudeDeg, fix.LongitudeDeg);
 
             output.Add(fix with
             {

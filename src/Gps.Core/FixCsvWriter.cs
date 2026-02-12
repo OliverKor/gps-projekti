@@ -4,13 +4,10 @@ namespace Gps.Core;
 
 public sealed class FixCsvWriter : IDisposable
 {
-    private const double MetersPerLatitudeDegree = 111_132.92;
-    private const double MetersPerLongitudeDegreeAtEquator = 111_320.0;
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     private readonly StreamWriter _writer;
-    private double? _originLatitudeDeg;
-    private double? _originLongitudeDeg;
+    private readonly LocalMetersProjector _projector;
 
     public FixCsvWriter(string path)
     {
@@ -18,6 +15,7 @@ public sealed class FixCsvWriter : IDisposable
 
         var writeHeader = !File.Exists(path) || new FileInfo(path).Length == 0;
         _writer = new StreamWriter(path, append: true) { AutoFlush = true };
+        _projector = new LocalMetersProjector();
 
         if (writeHeader)
         {
@@ -29,15 +27,9 @@ public sealed class FixCsvWriter : IDisposable
     {
         ArgumentNullException.ThrowIfNull(fix);
 
-        _originLatitudeDeg ??= fix.LatitudeDeg;
-        _originLongitudeDeg ??= fix.LongitudeDeg;
-
-        var latitudeMeters = fix.LatitudeMeters
-            ?? (fix.LatitudeDeg - _originLatitudeDeg.Value) * MetersPerLatitudeDegree;
-
-        var cosLat0 = Math.Cos(_originLatitudeDeg.Value * (Math.PI / 180.0));
-        var longitudeMeters = fix.LongitudeMeters
-            ?? (fix.LongitudeDeg - _originLongitudeDeg.Value) * MetersPerLongitudeDegreeAtEquator * cosLat0;
+        var projected = _projector.Project(fix.LatitudeDeg, fix.LongitudeDeg);
+        var latitudeMeters = fix.LatitudeMeters ?? projected.LatitudeMeters;
+        var longitudeMeters = fix.LongitudeMeters ?? projected.LongitudeMeters;
 
         var speed = fix.SpeedMps.HasValue ? fix.SpeedMps.Value.ToString("F2", Inv) : string.Empty;
         var numSv = fix.NumSv.HasValue ? fix.NumSv.Value.ToString(Inv) : string.Empty;

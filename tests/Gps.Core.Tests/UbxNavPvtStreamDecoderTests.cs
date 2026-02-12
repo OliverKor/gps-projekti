@@ -48,6 +48,35 @@ public class UbxNavPvtStreamDecoderTests
     }
 
     [Fact]
+    public void TryAppend_SkipsFrameWithoutGnssFixFlag()
+    {
+        var decoder = new Gps.Core.UbxNavPvtStreamDecoder();
+        var output = new List<Gps.Core.Fix>();
+        var frame = CreateNavPvtFrame(fixStatusFlags: 0x00);
+
+        var emitted = decoder.TryAppend(frame, output);
+
+        Assert.False(emitted);
+        Assert.Empty(output);
+    }
+
+    [Theory]
+    [InlineData((byte)0)]
+    [InlineData((byte)1)]
+    [InlineData((byte)5)]
+    public void TryAppend_SkipsNonPositionalFixTypes(byte fixType)
+    {
+        var decoder = new Gps.Core.UbxNavPvtStreamDecoder();
+        var output = new List<Gps.Core.Fix>();
+        var frame = CreateNavPvtFrame(fixType: fixType);
+
+        var emitted = decoder.TryAppend(frame, output);
+
+        Assert.False(emitted);
+        Assert.Empty(output);
+    }
+
+    [Fact]
     public void TryAppend_RecoversAfterChecksumFailure()
     {
         var decoder = new Gps.Core.UbxNavPvtStreamDecoder();
@@ -103,6 +132,22 @@ public class UbxNavPvtStreamDecoderTests
         Assert.Equal(62.7905840, output[0].LatitudeDeg, 7);
     }
 
+    [Fact]
+    public void TryAppend_HandlesFrameSplitAcrossAppends()
+    {
+        var decoder = new Gps.Core.UbxNavPvtStreamDecoder();
+        var output = new List<Gps.Core.Fix>();
+        var frame = CreateNavPvtFrame(second: 12);
+
+        var emittedFirstChunk = decoder.TryAppend(frame.AsSpan(0, 18), output);
+        var emittedSecondChunk = decoder.TryAppend(frame.AsSpan(18), output);
+
+        Assert.False(emittedFirstChunk);
+        Assert.True(emittedSecondChunk);
+        Assert.Single(output);
+        Assert.Equal(new DateTimeOffset(2026, 2, 4, 14, 15, 12, TimeSpan.Zero), output[0].Timestamp);
+    }
+
     private static byte[] CreateNavPvtFrame(
         int year = 2026,
         int month = 2,
@@ -111,6 +156,7 @@ public class UbxNavPvtStreamDecoderTests
         int minute = 15,
         int second = 6,
         byte validFlags = 0x07,
+        byte fixStatusFlags = 0x01,
         double latitudeDeg = 62.7905840,
         double longitudeDeg = 22.8185170,
         double speedMps = 0.05,
@@ -127,6 +173,7 @@ public class UbxNavPvtStreamDecoderTests
         payload[10] = (byte)second;
         payload[11] = validFlags;
         payload[20] = fixType;
+        payload[21] = fixStatusFlags;
         payload[23] = numSv;
 
         var longitudeRaw = (int)Math.Round(longitudeDeg * 1e7);

@@ -7,6 +7,10 @@ internal static class NavPvtDecoder
     private const byte NavClass = 0x01;
     private const byte NavPvtId = 0x07;
     private const int NavPvtPayloadLength = 92;
+    private const byte ValidDateFlag = 0x01;
+    private const byte ValidTimeFlag = 0x02;
+    private const byte FullyResolvedFlag = 0x04;
+    private const byte GnssFixOkFlag = 0x01;
 
     public static bool TryDecode(UbxFrame frame, out Fix fix)
     {
@@ -27,11 +31,21 @@ internal static class NavPvtDecoder
         var second = payload[10];
 
         var validFlags = payload[11];
-        var validDate = (validFlags & 0x01) != 0;
-        var validTime = (validFlags & 0x02) != 0;
-        var fullyResolved = (validFlags & 0x04) != 0;
+        var validDate = (validFlags & ValidDateFlag) != 0;
+        var validTime = (validFlags & ValidTimeFlag) != 0;
+        var fullyResolved = (validFlags & FullyResolvedFlag) != 0;
 
         if (!validDate || !validTime || !fullyResolved)
+        {
+            return false;
+        }
+
+        var fixTypeValue = payload[20];
+        var navigationStatusFlags = payload[21];
+        var hasGnssFix = (navigationStatusFlags & GnssFixOkFlag) != 0;
+        var hasPositionFixType = fixTypeValue is 2 or 3 or 4;
+
+        if (!hasGnssFix || !hasPositionFixType)
         {
             return false;
         }
@@ -47,7 +61,7 @@ internal static class NavPvtDecoder
             return false;
         }
 
-        var fixType = payload[20] switch
+        var fixType = fixTypeValue switch
         {
             0 => "NoFix",
             1 => "DR",

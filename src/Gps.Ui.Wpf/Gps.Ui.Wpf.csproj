@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +15,8 @@
 
   <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="10.0.2" />
+    <PackageReference Include="Mapsui.Nts" Version="5.0.2" />
+    <PackageReference Include="Mapsui.Wpf" Version="5.0.2" />
   </ItemGroup>
 
 </Project>

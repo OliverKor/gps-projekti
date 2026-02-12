@@ -13,7 +13,7 @@ This repository now focuses on a single runtime app:
 
 - Live UBX stream parsing from serial (`0xB5 0x62` sync, checksum validation, resync on noise)
 - NAV-PVT decoding (class `0x01`, id `0x07`, payload `92`)
-- Real-time local XY map (meter-projected from lat/lon) and fix table updates in WPF
+- Real-time map modes in WPF: `Real map` (OSM basemap) and `Local XY` (meter-projected)
 - Connect/Disconnect controls with runtime COM port and baud selection
 - Optional CSV logging (`track.csv`), default OFF
 - In-memory history cap of 5000 fixes for stable long sessions
@@ -37,12 +37,15 @@ dotnet run --project src/Gps.Ui.Wpf/Gps.Ui.Wpf.csproj
 2. Select COM port and baud rate.
 3. Optionally check `Log to CSV (track.csv)`.
 4. Click `Connect`.
-5. Watch live fixes on map + table.
-6. Click `Disconnect` to stop session.
+5. Choose map mode:
+   - `Real map`: OpenStreetMap basemap with live GPS overlay.
+   - `Local XY`: meter-projected local track view.
+6. Watch live fixes on map + table.
+7. Click `Disconnect` to stop session.
 
 CSV logging toggle is disabled while connected to keep behavior deterministic.
 
-The map is a local meter-projected track view rendered on a WPF canvas. It is not a street/tile basemap.
+`Real map` requires internet access for tiles. If repeated tile fetch failures occur, the app falls back to `Local XY`.
 
 ## CSV Output
 

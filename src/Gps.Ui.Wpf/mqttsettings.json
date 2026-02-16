@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "host": "localhost",
+  "port": 1883,
+  "baseTopic": "gps/v1",
+  "deviceId": "demo-truck-01",
+  "username": "",
+  "password": "",
+  "diagIntervalSeconds": 5,
+  "queueCapacity": 500,
+  "drainTimeoutSeconds": 2
+}

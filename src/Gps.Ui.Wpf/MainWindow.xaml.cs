@@ -1,4 +1,5 @@
 using Gps.Core;
+using Gps.Ui.Wpf.Mqtt;
 using Mapsui;
 using Mapsui.Layers;
 using Mapsui.Logging;
@@ -42,6 +43,7 @@ public partial class MainWindow : Window
     private readonly Queue<DateTimeOffset> _tileErrorTimestamps = new();
 
     private LiveGpsSession? _session;
+    private MqttSessionCoordinator? _mqttCoordinator;
     private Mapsui.Map? _realMap;
     private Layer? _trackLayer;
     private Layer? _latestLayer;
@@ -146,7 +148,7 @@ public partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        await StopSessionAsync();
+        await StopSessionAsync("window_closed");
         DetachMapLogging();
         _allowWindowClose = true;
         Close();
@@ -238,7 +240,9 @@ public partial class MainWindow : Window
         UpdateUiState();
 
         var loggingText = logToCsv ? $"ON ({csvPath})" : "OFF";
-        SetStatus($"Connected to {portName} @ {baudRate}. Map mode: {GetCurrentMapModeLabel()}. CSV logging: {loggingText}.");
+        var mqttStatus = StartMqttCoordinatorIfEnabled();
+        SetStatus(
+            $"Connected to {portName} @ {baudRate}. Map mode: {GetCurrentMapModeLabel()}. CSV logging: {loggingText}. MQTT: {mqttStatus}.");
     }
 
     private void ResetSessionViewState()
@@ -252,17 +256,18 @@ public partial class MainWindow : Window
 
     private async void DisconnectButton_OnClick(object sender, RoutedEventArgs e)
     {
-        await StopSessionAsync();
+        await StopSessionAsync("user_disconnect");
         SetStatus("Disconnected.");
     }
 
-    private async Task StopSessionAsync()
+    private async Task StopSessionAsync(string mqttReason)
     {
         var session = _session;
         if (session is null)
         {
             _isConnected = false;
             UpdateUiState();
+            await StopMqttCoordinatorAsync(mqttReason);
             return;
         }
 
@@ -276,6 +281,7 @@ public partial class MainWindow : Window
 
         await session.StopAsync();
         session.Dispose();
+        await StopMqttCoordinatorAsync(mqttReason);
     }
 
     private void OnFixReceived(object? sender, Fix fix)
@@ -291,6 +297,7 @@ public partial class MainWindow : Window
             DrawTrack();
             UpdateRealMapOverlays();
             FollowRealMapIfEnabled(fix);
+            _mqttCoordinator?.OnFixReceived(fix);
             Status.Text = BuildConnectedStatus(fix);
         });
     }
@@ -533,7 +540,7 @@ public partial class MainWindow : Window
     {
         _ = Dispatcher.InvokeAsync(async () =>
         {
-            await StopSessionAsync();
+            await StopSessionAsync($"session_error:{message}");
             SetStatus(message);
         });
     }
@@ -561,6 +568,49 @@ public partial class MainWindow : Window
     private void SetStatus(string message)
     {
         Status.Text = message;
+    }
+
+    private string StartMqttCoordinatorIfEnabled()
+    {
+        _mqttCoordinator = null;
+
+        var settings = MqttSettingsLoader.LoadFromAppBaseDirectory();
+        if (!settings.Enabled)
+        {
+            return "OFF";
+        }
+
+        try
+        {
+            var coordinator = new MqttSessionCoordinator(settings);
+            coordinator.Start();
+            _mqttCoordinator = coordinator;
+            return $"ON ({settings.Host}:{settings.Port})";
+        }
+        catch (Exception ex)
+        {
+            _mqttCoordinator = null;
+            return $"FAILED ({ex.Message})";
+        }
+    }
+
+    private async Task StopMqttCoordinatorAsync(string reason)
+    {
+        var coordinator = _mqttCoordinator;
+        _mqttCoordinator = null;
+        if (coordinator is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await coordinator.StopAsync(reason);
+        }
+        catch
+        {
+            // Keep local UI/session behavior stable even if MQTT shutdown fails.
+        }
     }
 
     private void DrawTrack()

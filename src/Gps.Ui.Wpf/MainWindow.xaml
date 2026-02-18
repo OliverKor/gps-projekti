@@ -11,6 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="300" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
@@ -69,7 +70,18 @@
                    FontSize="15"
                    Margin="0,0,0,10" />
 
-        <Border Grid.Row="2"
+        <StackPanel Grid.Row="2" Margin="0,0,0,10">
+            <TextBlock x:Name="TelemetryPrimary"
+                       FontSize="13"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,2" />
+            <TextBlock x:Name="TelemetrySecondary"
+                       FontSize="12"
+                       Foreground="#444"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border Grid.Row="3"
                 BorderBrush="#222"
                 BorderThickness="1"
                 Margin="0,0,0,10">
@@ -89,7 +101,7 @@
             </Grid>
         </Border>
 
-        <ListView x:Name="Fixes" Grid.Row="3">
+        <ListView x:Name="Fixes" Grid.Row="4">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="230" />

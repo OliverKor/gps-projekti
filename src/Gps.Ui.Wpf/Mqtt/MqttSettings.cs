@@ -12,6 +12,10 @@ public sealed record MqttSettings
     public int DiagIntervalSeconds { get; init; } = 5;
     public int QueueCapacity { get; init; } = 500;
     public int DrainTimeoutSeconds { get; init; } = 2;
+    public double? SpeedLimitMps { get; init; }
+    public double? GeofenceCenterLat { get; init; }
+    public double? GeofenceCenterLon { get; init; }
+    public double? GeofenceRadiusM { get; init; }
 
     public MqttSettings Sanitize()
     {
@@ -22,6 +26,17 @@ public sealed record MqttSettings
         var diagInterval = Math.Clamp(DiagIntervalSeconds, 1, 3600);
         var queueCapacity = Math.Clamp(QueueCapacity, 10, 10000);
         var drainTimeout = Math.Clamp(DrainTimeoutSeconds, 1, 30);
+        var speedLimit = SpeedLimitMps.HasValue && SpeedLimitMps.Value > 0 ? SpeedLimitMps : null;
+        var geofenceLat = IsLatitude(GeofenceCenterLat) ? GeofenceCenterLat : null;
+        var geofenceLon = IsLongitude(GeofenceCenterLon) ? GeofenceCenterLon : null;
+        var geofenceRadius = GeofenceRadiusM.HasValue && GeofenceRadiusM.Value > 0 ? GeofenceRadiusM : null;
+
+        if (!geofenceLat.HasValue || !geofenceLon.HasValue || !geofenceRadius.HasValue)
+        {
+            geofenceLat = null;
+            geofenceLon = null;
+            geofenceRadius = null;
+        }
 
         return this with
         {
@@ -33,8 +48,22 @@ public sealed record MqttSettings
             QueueCapacity = queueCapacity,
             DrainTimeoutSeconds = drainTimeout,
             Username = Username?.Trim() ?? string.Empty,
-            Password = Password ?? string.Empty
+            Password = Password ?? string.Empty,
+            SpeedLimitMps = speedLimit,
+            GeofenceCenterLat = geofenceLat,
+            GeofenceCenterLon = geofenceLon,
+            GeofenceRadiusM = geofenceRadius
         };
+    }
+
+    private static bool IsLatitude(double? value)
+    {
+        return value.HasValue && value.Value >= -90.0 && value.Value <= 90.0;
+    }
+
+    private static bool IsLongitude(double? value)
+    {
+        return value.HasValue && value.Value >= -180.0 && value.Value <= 180.0;
     }
 
     public static MqttSettings DisabledDefaults => new()

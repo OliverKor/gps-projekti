@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "host": "localhost",
   "port": 1883,
   "baseTopic": "gps/v1",
@@ -8,5 +8,9 @@
   "password": "",
   "diagIntervalSeconds": 5,
   "queueCapacity": 500,
-  "drainTimeoutSeconds": 2
+  "drainTimeoutSeconds": 2,
+  "speedLimitMps": null,
+  "geofenceCenterLat": null,
+  "geofenceCenterLon": null,
+  "geofenceRadiusM": null
 }

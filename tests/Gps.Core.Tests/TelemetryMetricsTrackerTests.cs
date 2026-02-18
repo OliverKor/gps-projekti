@@ -88,4 +88,96 @@ public sealed class TelemetryMetricsTrackerTests
         Assert.Equal(2.0, diagnostic.LastFixAgeSec, 2);
         Assert.Equal(2.0, diagnostic.NoFixSeconds, 2);
     }
+
+    [Fact]
+    public void RecordFix_EmitsSpeedLimitAlerts_OnThresholdTransitionsOnly()
+    {
+        var rules = new TelemetryAlertRules(SpeedLimitMps: 5.0);
+        var tracker = new TelemetryMetricsTracker(alertRules: rules);
+        var alerts = new List<TelemetryAlert>();
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 0, TimeSpan.Zero),
+            62.7905840,
+            22.8185170,
+            4.0), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 1, TimeSpan.Zero),
+            62.7905841,
+            22.8185171,
+            6.0), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 2, TimeSpan.Zero),
+            62.7905842,
+            22.8185172,
+            7.0), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 3, TimeSpan.Zero),
+            62.7905843,
+            22.8185173,
+            3.0), alerts);
+
+        Assert.Collection(
+            alerts.Where(alert => alert.Code is "SPEED_LIMIT_EXCEEDED" or "SPEED_LIMIT_RECOVERED"),
+            alert =>
+            {
+                Assert.Equal("SPEED_LIMIT_EXCEEDED", alert.Code);
+                Assert.Equal("warning", alert.Severity);
+            },
+            alert =>
+            {
+                Assert.Equal("SPEED_LIMIT_RECOVERED", alert.Code);
+                Assert.Equal("info", alert.Severity);
+            });
+    }
+
+    [Fact]
+    public void RecordFix_EmitsGeofenceAlerts_OnBoundaryTransitionsOnly()
+    {
+        var rules = new TelemetryAlertRules(
+            GeofenceCenterLat: 62.7905840,
+            GeofenceCenterLon: 22.8185170,
+            GeofenceRadiusM: 20.0);
+
+        var tracker = new TelemetryMetricsTracker(alertRules: rules);
+        var alerts = new List<TelemetryAlert>();
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 0, TimeSpan.Zero),
+            62.7905840,
+            22.8185170), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 1, TimeSpan.Zero),
+            62.7909000,
+            22.8185170), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 2, TimeSpan.Zero),
+            62.7909100,
+            22.8185200), alerts);
+
+        _ = tracker.RecordFix(new Fix(
+            new DateTimeOffset(2026, 2, 16, 12, 0, 3, TimeSpan.Zero),
+            62.7905900,
+            22.8185170), alerts);
+
+        Assert.Collection(
+            alerts.Where(alert => alert.Code is "GEOFENCE_EXIT" or "GEOFENCE_ENTER"),
+            alert =>
+            {
+                Assert.Equal("GEOFENCE_EXIT", alert.Code);
+                Assert.Equal("warning", alert.Severity);
+                Assert.True(alert.Value > 20.0);
+            },
+            alert =>
+            {
+                Assert.Equal("GEOFENCE_ENTER", alert.Code);
+                Assert.Equal("info", alert.Severity);
+                Assert.True(alert.Value <= 20.0);
+            });
+    }
 }

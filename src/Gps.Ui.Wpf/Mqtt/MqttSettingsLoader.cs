@@ -14,23 +14,34 @@ internal static class MqttSettingsLoader
         AllowTrailingCommas = true
     };
 
-    public static MqttSettings LoadFromAppBaseDirectory()
+    public static MqttSettingsLoadResult LoadFromAppBaseDirectory()
     {
         var path = Path.Combine(AppContext.BaseDirectory, SettingsFileName);
         if (!File.Exists(path))
         {
-            return MqttSettings.DisabledDefaults;
+            return new MqttSettingsLoadResult(
+                MqttSettings.DisabledDefaults,
+                $"MQTT config missing: '{path}'.");
         }
 
         try
         {
             var json = File.ReadAllText(path);
             var parsed = JsonSerializer.Deserialize<MqttSettings>(json, JsonOptions);
-            return (parsed ?? MqttSettings.DisabledDefaults).Sanitize();
+            if (parsed is null)
+            {
+                return new MqttSettingsLoadResult(
+                    MqttSettings.DisabledDefaults,
+                    $"MQTT config is invalid: '{path}'.");
+            }
+
+            return new MqttSettingsLoadResult(parsed.Sanitize(), null);
         }
-        catch
+        catch (Exception ex)
         {
-            return MqttSettings.DisabledDefaults;
+            return new MqttSettingsLoadResult(
+                MqttSettings.DisabledDefaults,
+                $"MQTT config error: {ex.Message}");
         }
     }
 }

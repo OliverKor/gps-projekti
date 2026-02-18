@@ -25,7 +25,7 @@ internal sealed class MqttSessionCoordinator : IAsyncDisposable
     {
         _settings = settings.Sanitize();
         _publisher = new MqttPublisher(_settings);
-        _tracker = new TelemetryMetricsTracker();
+        _tracker = new TelemetryMetricsTracker(alertRules: BuildAlertRules(_settings));
 
         var baseTopic = _settings.BaseTopic.Trim('/');
         _fixTopic = $"{baseTopic}/{_settings.DeviceId}/fix";
@@ -87,6 +87,12 @@ internal sealed class MqttSessionCoordinator : IAsyncDisposable
 
         _publisher.TryEnqueueJson(_fixTopic, fixPayload);
         PublishAlerts(alerts);
+    }
+
+    public MqttHealthSnapshot GetHealthSnapshot()
+    {
+        EnsureOwnerThread();
+        return _publisher.GetHealthSnapshot();
     }
 
     private void OnDiagTimerTick(object? sender, EventArgs e)
@@ -177,6 +183,23 @@ internal sealed class MqttSessionCoordinator : IAsyncDisposable
     {
         await StopAsync("disposed");
         await _publisher.DisposeAsync();
+    }
+
+    private static TelemetryAlertRules? BuildAlertRules(MqttSettings settings)
+    {
+        if (!settings.SpeedLimitMps.HasValue &&
+            !settings.GeofenceCenterLat.HasValue &&
+            !settings.GeofenceCenterLon.HasValue &&
+            !settings.GeofenceRadiusM.HasValue)
+        {
+            return null;
+        }
+
+        return new TelemetryAlertRules(
+            settings.SpeedLimitMps,
+            settings.GeofenceCenterLat,
+            settings.GeofenceCenterLon,
+            settings.GeofenceRadiusM);
     }
 
     private readonly record struct FixPayload(

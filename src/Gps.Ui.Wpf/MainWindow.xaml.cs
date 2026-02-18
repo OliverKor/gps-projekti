@@ -1,4 +1,5 @@
 using Gps.Core;
+using Gps.Core.Telemetry;
 using Gps.Ui.Wpf.Mqtt;
 using Mapsui;
 using Mapsui.Layers;
@@ -14,6 +15,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using MapsuiBrush = Mapsui.Styles.Brush;
 using MapsuiColor = Mapsui.Styles.Color;
 using MapsuiPen = Mapsui.Styles.Pen;
@@ -35,15 +37,18 @@ public partial class MainWindow : Window
     private const string DefaultMapCrs = "EPSG:3857";
     private const string Wgs84Crs = "EPSG:4326";
     private const int TileErrorFallbackThreshold = 8;
+    private static readonly TimeSpan TelemetryRefreshInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan TileErrorWindow = TimeSpan.FromSeconds(30);
     private static readonly string[] TileFailureKeywords = ["tile", "http", "network", "socket", "timeout", "openstreetmap"];
     private static readonly int[] BaudRateOptions = [9600, 19200, 38400, 57600, 115200];
 
     private readonly ObservableCollection<Fix> _fixes = [];
     private readonly Queue<DateTimeOffset> _tileErrorTimestamps = new();
+    private readonly DispatcherTimer _telemetryRefreshTimer;
 
     private LiveGpsSession? _session;
     private MqttSessionCoordinator? _mqttCoordinator;
+    private TelemetryMetricsTracker _telemetryTracker = new(DateTimeOffset.UtcNow);
     private Mapsui.Map? _realMap;
     private Layer? _trackLayer;
     private Layer? _latestLayer;
@@ -62,10 +67,18 @@ public partial class MainWindow : Window
     private Action<LogLevel, string, Exception?>? _installedMapLogDelegate;
 
     private MapMode _currentMapMode = MapMode.RealMap;
+    private MqttUiMode _mqttUiMode = MqttUiMode.Off;
+    private MqttHealthSnapshot _mqttFallbackHealth = new(false, 0, 0, 0, null, null);
 
     public MainWindow()
     {
         InitializeComponent();
+        _telemetryRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TelemetryRefreshInterval
+        };
+
+        _telemetryRefreshTimer.Tick += OnTelemetryRefreshTick;
         Loaded += OnLoaded;
         Closing += OnClosing;
     }
@@ -94,6 +107,8 @@ public partial class MainWindow : Window
             SetStatus("Disconnected.");
         }
 
+        _telemetryRefreshTimer.Start();
+        UpdateTelemetryPanel();
         UpdateUiState();
     }
 
@@ -149,6 +164,8 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
         await StopSessionAsync("window_closed");
+        _telemetryRefreshTimer.Stop();
+        _telemetryRefreshTimer.Tick -= OnTelemetryRefreshTick;
         DetachMapLogging();
         _allowWindowClose = true;
         Close();
@@ -243,21 +260,25 @@ public partial class MainWindow : Window
         var mqttStatus = StartMqttCoordinatorIfEnabled();
         SetStatus(
             $"Connected to {portName} @ {baudRate}. Map mode: {GetCurrentMapModeLabel()}. CSV logging: {loggingText}. MQTT: {mqttStatus}.");
+        UpdateTelemetryPanel();
     }
 
     private void ResetSessionViewState()
     {
         _fixes.Clear();
+        _telemetryTracker = new TelemetryMetricsTracker(DateTimeOffset.UtcNow);
         _hasCenteredRealMap = false;
         ResetTileErrorTracking(clearFallbackFlag: true);
         DrawTrack();
         UpdateRealMapOverlays();
+        UpdateTelemetryPanel();
     }
 
     private async void DisconnectButton_OnClick(object sender, RoutedEventArgs e)
     {
         await StopSessionAsync("user_disconnect");
         SetStatus("Disconnected.");
+        UpdateTelemetryPanel();
     }
 
     private async Task StopSessionAsync(string mqttReason)
@@ -268,6 +289,7 @@ public partial class MainWindow : Window
             _isConnected = false;
             UpdateUiState();
             await StopMqttCoordinatorAsync(mqttReason);
+            UpdateTelemetryPanel();
             return;
         }
 
@@ -282,6 +304,7 @@ public partial class MainWindow : Window
         await session.StopAsync();
         session.Dispose();
         await StopMqttCoordinatorAsync(mqttReason);
+        UpdateTelemetryPanel();
     }
 
     private void OnFixReceived(object? sender, Fix fix)
@@ -294,11 +317,13 @@ public partial class MainWindow : Window
                 _fixes.RemoveAt(0);
             }
 
+            _ = _telemetryTracker.RecordFix(fix);
             DrawTrack();
             UpdateRealMapOverlays();
             FollowRealMapIfEnabled(fix);
             _mqttCoordinator?.OnFixReceived(fix);
             Status.Text = BuildConnectedStatus(fix);
+            UpdateTelemetryPanel();
         });
     }
 
@@ -551,6 +576,7 @@ public partial class MainWindow : Window
         {
             _isConnected = false;
             UpdateUiState();
+            UpdateTelemetryPanel();
         });
     }
 
@@ -570,15 +596,59 @@ public partial class MainWindow : Window
         Status.Text = message;
     }
 
+    private void OnTelemetryRefreshTick(object? sender, EventArgs e)
+    {
+        UpdateTelemetryPanel();
+    }
+
+    private void UpdateTelemetryPanel()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = _telemetryTracker.GetSnapshot();
+        var diagnostic = _telemetryTracker.CreateDiagnostic(now);
+        var mqttHealth = GetCurrentMqttHealthSnapshot();
+
+        var mqttState = GetMqttStateLabel(mqttHealth);
+        var lastFixAgeText = snapshot.LastFixTimestampUtc.HasValue ? $"{diagnostic.LastFixAgeSec:F1}s" : "n/a";
+        var fixRateText = $"{diagnostic.FixRateHz:F2} Hz";
+        var lastErrorText = FormatLastMqttError(mqttHealth);
+
+        TelemetryPrimary.Text =
+            $"Fix rate: {fixRateText}. Last fix age: {lastFixAgeText}. Distance total: {snapshot.DistanceTotalM:F1} m. MQTT: {mqttState}.";
+
+        TelemetrySecondary.Text =
+            $"Queue depth: {mqttHealth.QueueDepth}. Dropped: {mqttHealth.DroppedCount}. Publish failures: {mqttHealth.PublishFailures}. " +
+            $"Last error: {lastErrorText}.";
+    }
+
     private string StartMqttCoordinatorIfEnabled()
     {
         _mqttCoordinator = null;
+        _mqttFallbackHealth = new MqttHealthSnapshot(false, 0, 0, 0, null, null);
 
-        var settings = MqttSettingsLoader.LoadFromAppBaseDirectory();
+        var loadResult = MqttSettingsLoader.LoadFromAppBaseDirectory();
+        if (loadResult.HasError)
+        {
+            _mqttUiMode = MqttUiMode.ConfigError;
+            _mqttFallbackHealth = new MqttHealthSnapshot(
+                false,
+                0,
+                0,
+                0,
+                loadResult.ErrorMessage,
+                DateTimeOffset.UtcNow);
+
+            return $"CONFIG ERROR ({loadResult.ErrorMessage})";
+        }
+
+        var settings = loadResult.Settings;
         if (!settings.Enabled)
         {
+            _mqttUiMode = MqttUiMode.Off;
             return "OFF";
         }
+
+        _mqttUiMode = MqttUiMode.Enabled;
 
         try
         {
@@ -590,6 +660,14 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _mqttCoordinator = null;
+            _mqttFallbackHealth = new MqttHealthSnapshot(
+                false,
+                0,
+                0,
+                0,
+                $"MQTT startup failure: {ex.Message}",
+                DateTimeOffset.UtcNow);
+
             return $"FAILED ({ex.Message})";
         }
     }
@@ -598,6 +676,13 @@ public partial class MainWindow : Window
     {
         var coordinator = _mqttCoordinator;
         _mqttCoordinator = null;
+
+        if (_mqttUiMode == MqttUiMode.Enabled)
+        {
+            _mqttUiMode = MqttUiMode.Off;
+            _mqttFallbackHealth = new MqttHealthSnapshot(false, 0, 0, 0, null, null);
+        }
+
         if (coordinator is null)
         {
             return;
@@ -611,6 +696,36 @@ public partial class MainWindow : Window
         {
             // Keep local UI/session behavior stable even if MQTT shutdown fails.
         }
+    }
+
+    private MqttHealthSnapshot GetCurrentMqttHealthSnapshot()
+    {
+        return _mqttCoordinator?.GetHealthSnapshot() ?? _mqttFallbackHealth;
+    }
+
+    private string GetMqttStateLabel(MqttHealthSnapshot mqttHealth)
+    {
+        return _mqttUiMode switch
+        {
+            MqttUiMode.ConfigError => "Config error",
+            MqttUiMode.Off => "Off",
+            _ => mqttHealth.IsConnected ? "Connected" : "Disconnected/Reconnecting"
+        };
+    }
+
+    private static string FormatLastMqttError(MqttHealthSnapshot mqttHealth)
+    {
+        if (string.IsNullOrWhiteSpace(mqttHealth.LastError))
+        {
+            return "none";
+        }
+
+        if (!mqttHealth.LastErrorUtc.HasValue)
+        {
+            return mqttHealth.LastError!;
+        }
+
+        return $"{mqttHealth.LastError} @ {mqttHealth.LastErrorUtc.Value:HH:mm:ss} UTC";
     }
 
     private void DrawTrack()
@@ -737,5 +852,12 @@ public partial class MainWindow : Window
     {
         RealMap,
         LocalXy
+    }
+
+    private enum MqttUiMode
+    {
+        Off,
+        ConfigError,
+        Enabled
     }
 }

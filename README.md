@@ -19,7 +19,11 @@ This repository now focuses on a single runtime app:
 - In-memory history cap of 5000 fixes for stable long sessions
 - Strict timestamp validity checks (`validDate`, `validTime`, `fullyResolved`)
 - Optional MQTT publishing (`fix`, `diag`, `alert`, `status`) with reconnect and bounded queue
+- Live telemetry panel in WPF with fix rate, last-fix age, distance, and MQTT health
+- Optional speed-limit and circular geofence alerts on the MQTT `alert` topic
 - Local demo infra (`Mosquitto` + `Node-RED`) for a one-panel telemetry dashboard
+
+Technical appendix: `docs/technical-appendix.md`
 
 ## Requirements
 
@@ -49,7 +53,7 @@ Services:
 - Mosquitto broker: `localhost:1883`
 - Node-RED dashboard editor: `http://localhost:1880`
 
-### 2. Enable MQTT in app settings
+### 2. Review MQTT app settings
 
 Edit `mqttsettings.json` in the app output folder (`AppContext.BaseDirectory`).
 
@@ -70,9 +74,15 @@ Use this sample:
   "password": "",
   "diagIntervalSeconds": 5,
   "queueCapacity": 500,
-  "drainTimeoutSeconds": 2
+  "drainTimeoutSeconds": 2,
+  "speedLimitMps": null,
+  "geofenceCenterLat": null,
+  "geofenceCenterLon": null,
+  "geofenceRadiusM": null
 }
 ```
+
+`enabled` defaults to `true` in the shipped config. If the config file is missing or invalid, the app reports a visible MQTT config error and keeps MQTT disabled.
 
 ### 3. Run app and connect GPS
 
@@ -101,7 +111,8 @@ Node-RED dashboard path:
    - `Real map`: OpenStreetMap basemap with live GPS overlay.
    - `Local XY`: meter-projected local track view.
 6. Watch live fixes on map + table.
-7. Click `Disconnect` to stop session.
+7. Observe the telemetry panel below status (fix rate, last-fix age, distance, MQTT health).
+8. Click `Disconnect` to stop session.
 
 CSV logging toggle is disabled while connected to keep behavior deterministic.
 
@@ -123,6 +134,8 @@ gps-projekti/
   src/
     Gps.Core/        # UBX parsing + NAV-PVT decoding + CSV read/write
     Gps.Ui.Wpf/      # Live serial session + WPF UI + optional MQTT publish
+  docs/
+    technical-appendix.md
   infra/
     mosquitto/       # Local broker config
     node-red/        # Local dashboard image + flow
@@ -158,6 +171,7 @@ gps-projekti/
 ### MQTT is not publishing
 
 - Verify `enabled: true` in output-folder `mqttsettings.json`.
+- Check for `CONFIG ERROR (...)` in app status if settings are missing/invalid.
 - Ensure Mosquitto is running on `localhost:1883`.
 - Confirm Docker services with `docker compose -f infra/docker-compose.yml ps`.
 - Check topic activity:

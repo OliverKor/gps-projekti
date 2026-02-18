@@ -16,10 +16,14 @@ internal sealed class MqttPublisher : IAsyncDisposable
     private readonly MqttMessageQueue<OutboundMessage> _queue;
     private readonly MqttMessagePump<OutboundMessage> _pump;
     private readonly IMqttClient _client;
+    private readonly object _stateSync = new();
 
     private long _publishFailures;
     private bool _started;
     private bool _stopped;
+    private bool _isConnected;
+    private string? _lastError;
+    private DateTimeOffset? _lastErrorUtc;
 
     public MqttPublisher(MqttSettings settings)
     {
@@ -70,6 +74,22 @@ internal sealed class MqttPublisher : IAsyncDisposable
             Interlocked.Read(ref _publishFailures));
     }
 
+    public MqttHealthSnapshot GetHealthSnapshot()
+    {
+        var counters = GetCounters();
+
+        lock (_stateSync)
+        {
+            return new MqttHealthSnapshot(
+                _isConnected,
+                counters.QueueDepth,
+                counters.DroppedCount,
+                counters.PublishFailures,
+                _lastError,
+                _lastErrorUtc);
+        }
+    }
+
     public async Task<bool> StopAsync(TimeSpan drainTimeout)
     {
         if (_stopped)
@@ -91,7 +111,13 @@ internal sealed class MqttPublisher : IAsyncDisposable
             {
                 // Ignore disconnect errors on shutdown.
             }
+            finally
+            {
+                SetConnectionState(false);
+            }
         }
+
+        SetConnectionState(false);
 
         await _pump.DisposeAsync().ConfigureAwait(false);
         return drained;
@@ -119,9 +145,10 @@ internal sealed class MqttPublisher : IAsyncDisposable
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
                 Interlocked.Increment(ref _publishFailures);
+                RecordError("publish", ex.Message);
                 await ForceDisconnectAsync().ConfigureAwait(false);
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
             }
@@ -137,15 +164,19 @@ internal sealed class MqttPublisher : IAsyncDisposable
             try
             {
                 await _client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+                SetConnectionState(true);
+                ClearLastError();
                 return;
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
                 Interlocked.Increment(ref _publishFailures);
+                SetConnectionState(false);
+                RecordError("connect", ex.Message);
                 await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
             }
         }
@@ -188,6 +219,10 @@ internal sealed class MqttPublisher : IAsyncDisposable
         {
             // Ignore failures; reconnect loop handles recovery.
         }
+        finally
+        {
+            SetConnectionState(false);
+        }
     }
 
     private string BuildStatusPayload(string state, string reason)
@@ -210,6 +245,34 @@ internal sealed class MqttPublisher : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _ = await StopAsync(TimeSpan.FromSeconds(_settings.DrainTimeoutSeconds)).ConfigureAwait(false);
+    }
+
+    private void SetConnectionState(bool isConnected)
+    {
+        lock (_stateSync)
+        {
+            _isConnected = isConnected;
+        }
+    }
+
+    private void ClearLastError()
+    {
+        lock (_stateSync)
+        {
+            _lastError = null;
+            _lastErrorUtc = null;
+        }
+    }
+
+    private void RecordError(string stage, string? detail)
+    {
+        var message = string.IsNullOrWhiteSpace(detail) ? $"MQTT {stage} failure." : $"MQTT {stage} failure: {detail}";
+
+        lock (_stateSync)
+        {
+            _lastError = message;
+            _lastErrorUtc = DateTimeOffset.UtcNow;
+        }
     }
 
     private readonly record struct OutboundMessage(string Topic, string Payload, bool Retain);

@@ -9,6 +9,7 @@ public sealed class TelemetryMetricsTracker
     private static readonly TimeSpan NoFixCriticalThreshold = TimeSpan.FromSeconds(30);
 
     private readonly DateTimeOffset _sessionStartUtc;
+    private readonly TelemetryAlertRules? _alertRules;
 
     private Fix? _previousFix;
     private DateTimeOffset? _firstFixTimestampUtc;
@@ -22,10 +23,13 @@ public sealed class TelemetryMetricsTracker
 
     private bool _noFixWarningRaised;
     private bool _noFixCriticalRaised;
+    private bool? _wasSpeedLimitExceeded;
+    private bool? _wasInsideGeofence;
 
-    public TelemetryMetricsTracker(DateTimeOffset? sessionStartUtc = null)
+    public TelemetryMetricsTracker(DateTimeOffset? sessionStartUtc = null, TelemetryAlertRules? alertRules = null)
     {
         _sessionStartUtc = (sessionStartUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        _alertRules = alertRules;
     }
 
     public TelemetrySnapshot RecordFix(Fix fix, ICollection<TelemetryAlert>? alerts = null)
@@ -47,6 +51,18 @@ public sealed class TelemetryMetricsTracker
             {
                 alerts?.Add(speedJumpAlert);
             }
+        }
+
+        var speedLimitAlert = TryCreateSpeedLimitTransitionAlert(fix, utcTimestamp);
+        if (speedLimitAlert is not null)
+        {
+            alerts?.Add(speedLimitAlert);
+        }
+
+        var geofenceAlert = TryCreateGeofenceTransitionAlert(fix, utcTimestamp);
+        if (geofenceAlert is not null)
+        {
+            alerts?.Add(geofenceAlert);
         }
 
         _previousFix = fix;
@@ -172,6 +188,101 @@ public sealed class TelemetryMetricsTracker
             "warning",
             "Speed changed abruptly between consecutive fixes.",
             speedDelta,
+            currentTimestampUtc);
+    }
+
+    private TelemetryAlert? TryCreateSpeedLimitTransitionAlert(Fix fix, DateTimeOffset currentTimestampUtc)
+    {
+        if (_alertRules is null || !_alertRules.SpeedLimitMps.HasValue)
+        {
+            return null;
+        }
+
+        if (!fix.SpeedMps.HasValue)
+        {
+            return null;
+        }
+
+        var speedLimit = _alertRules.SpeedLimitMps.Value;
+        var isExceeded = fix.SpeedMps.Value > speedLimit;
+
+        if (!_wasSpeedLimitExceeded.HasValue)
+        {
+            _wasSpeedLimitExceeded = isExceeded;
+            return null;
+        }
+
+        if (_wasSpeedLimitExceeded.Value == isExceeded)
+        {
+            return null;
+        }
+
+        _wasSpeedLimitExceeded = isExceeded;
+
+        if (isExceeded)
+        {
+            return new TelemetryAlert(
+                "SPEED_LIMIT_EXCEEDED",
+                "warning",
+                "Speed exceeded configured speed limit.",
+                fix.SpeedMps.Value,
+                currentTimestampUtc);
+        }
+
+        return new TelemetryAlert(
+            "SPEED_LIMIT_RECOVERED",
+            "info",
+            "Speed returned below configured speed limit.",
+            fix.SpeedMps.Value,
+            currentTimestampUtc);
+    }
+
+    private TelemetryAlert? TryCreateGeofenceTransitionAlert(Fix fix, DateTimeOffset currentTimestampUtc)
+    {
+        if (_alertRules is null ||
+            !_alertRules.GeofenceCenterLat.HasValue ||
+            !_alertRules.GeofenceCenterLon.HasValue ||
+            !_alertRules.GeofenceRadiusM.HasValue)
+        {
+            return null;
+        }
+
+        var distanceFromCenter = HaversineDistanceMeters(
+            _alertRules.GeofenceCenterLat.Value,
+            _alertRules.GeofenceCenterLon.Value,
+            fix.LatitudeDeg,
+            fix.LongitudeDeg);
+
+        var isInsideGeofence = distanceFromCenter <= _alertRules.GeofenceRadiusM.Value;
+
+        if (!_wasInsideGeofence.HasValue)
+        {
+            _wasInsideGeofence = isInsideGeofence;
+            return null;
+        }
+
+        if (_wasInsideGeofence.Value == isInsideGeofence)
+        {
+            return null;
+        }
+
+        _wasInsideGeofence = isInsideGeofence;
+
+        if (isInsideGeofence)
+        {
+            return new TelemetryAlert(
+                "GEOFENCE_ENTER",
+                "info",
+                "Fix returned inside configured geofence.",
+                distanceFromCenter,
+                currentTimestampUtc);
+        }
+
+        return new TelemetryAlert(
+            "GEOFENCE_EXIT",
+            "warning",
+            "Fix moved outside configured geofence.",
+            distanceFromCenter,
             currentTimestampUtc);
     }
 

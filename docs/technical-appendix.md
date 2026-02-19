@@ -56,6 +56,10 @@ Topics:
 - `alert`
 - `status` (retained)
 
+Node-RED dashboard note:
+- speed widgets convert MQTT speed values from m/s to km/h for display
+- MQTT `fix` payload fields remain `speedMps` and `averageSpeedMps` (m/s)
+
 QoS/retention:
 - QoS: at least once
 - `status` uses retained publish

@@ -93,6 +93,8 @@ dotnet run --project src/Gps.Ui.Wpf/Gps.Ui.Wpf.csproj
 Node-RED dashboard path:
 
 - `http://localhost:1880/ui`
+- Dashboard speed widgets display values in `km/h`.
+- MQTT `fix` payload remains unchanged (`speedMps`, `averageSpeedMps` are still in m/s).
 
 ### Topics
 

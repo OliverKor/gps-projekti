@@ -1,29 +1,117 @@
-﻿<Window x:Class="Gps.Ui.Wpf.MainWindow"
+<Window x:Class="Gps.Ui.Wpf.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d"
-        Title="GPS Track" Height="450" Width="800">
+        xmlns:mapsui="clr-namespace:Mapsui.UI.Wpf;assembly=Mapsui.UI.Wpf"
+        Title="Live GPS Track"
+        Height="700"
+        Width="1100"
+        MinHeight="560"
+        MinWidth="900">
     <Grid Margin="12">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="220"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="300" />
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock x:Name="Status" FontSize="16"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Port" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="PortCombo"
+                      Width="140"
+                      Margin="0,0,8,0" />
+            <Button x:Name="RefreshPortsButton"
+                    Content="Refresh Ports"
+                    Width="105"
+                    Margin="0,0,14,0"
+                    Click="RefreshPortsButton_OnClick" />
 
-        <Canvas x:Name="MapCanvas" Grid.Row="1" Margin="0,10,0,10" Background="#111"/>
+            <TextBlock Text="Baud" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="BaudRateCombo"
+                      Width="110"
+                      Margin="0,0,14,0" />
 
-        <ListView x:Name="Fixes" Grid.Row="2">
+            <CheckBox x:Name="LogToCsvCheckBox"
+                      Content="Log to CSV (track.csv)"
+                      VerticalAlignment="Center"
+                      Margin="0,0,14,0"
+                      IsChecked="False" />
+
+            <TextBlock Text="Map" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <ComboBox x:Name="MapModeCombo"
+                      Width="120"
+                      Margin="0,0,10,0"
+                      SelectionChanged="MapModeCombo_OnSelectionChanged">
+                <ComboBoxItem Content="Real map" />
+                <ComboBoxItem Content="Local XY" />
+            </ComboBox>
+
+            <CheckBox x:Name="AutoFollowCheckBox"
+                      Content="Auto-follow"
+                      VerticalAlignment="Center"
+                      Margin="0,0,14,0"
+                      IsChecked="True" />
+
+            <Button x:Name="ConnectButton"
+                    Content="Connect"
+                    Width="90"
+                    Margin="0,0,8,0"
+                    Click="ConnectButton_OnClick" />
+
+            <Button x:Name="DisconnectButton"
+                    Content="Disconnect"
+                    Width="95"
+                    Click="DisconnectButton_OnClick" />
+        </StackPanel>
+
+        <TextBlock x:Name="Status"
+                   Grid.Row="1"
+                   FontSize="15"
+                   Margin="0,0,0,10" />
+
+        <StackPanel Grid.Row="2" Margin="0,0,0,10">
+            <TextBlock x:Name="TelemetryPrimary"
+                       FontSize="13"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,2" />
+            <TextBlock x:Name="TelemetrySecondary"
+                       FontSize="12"
+                       Foreground="#444"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border Grid.Row="3"
+                BorderBrush="#222"
+                BorderThickness="1"
+                Margin="0,0,0,10">
+            <Grid>
+                <mapsui:MapControl x:Name="RealMapControl" />
+                <Canvas x:Name="MapCanvas" Background="#111" />
+                <TextBlock x:Name="MapAttribution"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Bottom"
+                           Margin="6"
+                           Padding="4,2"
+                           Background="#AA000000"
+                           Foreground="#EEEEEE"
+                           FontSize="11"
+                           Text="© OpenStreetMap contributors"
+                           Visibility="Collapsed" />
+            </Grid>
+        </Border>
+
+        <ListView x:Name="Fixes" Grid.Row="4">
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="180"/>
-                    <GridViewColumn Header="Lat" DisplayMemberBinding="{Binding LatitudeDeg}" Width="120"/>
-                    <GridViewColumn Header="Lon" DisplayMemberBinding="{Binding LongitudeDeg}" Width="120"/>
-                    <GridViewColumn Header="Speed" DisplayMemberBinding="{Binding SpeedMps}" Width="80"/>
-                    <GridViewColumn Header="SV" DisplayMemberBinding="{Binding NumSv}" Width="50"/>
+                    <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="230" />
+                    <GridViewColumn Header="Lat" DisplayMemberBinding="{Binding LatitudeDeg}" Width="120" />
+                    <GridViewColumn Header="Lat m" DisplayMemberBinding="{Binding LatitudeMeters}" Width="90" />
+                    <GridViewColumn Header="Lon" DisplayMemberBinding="{Binding LongitudeDeg}" Width="120" />
+                    <GridViewColumn Header="Lon m" DisplayMemberBinding="{Binding LongitudeMeters}" Width="90" />
+                    <GridViewColumn Header="Speed m/s" DisplayMemberBinding="{Binding SpeedMps}" Width="95" />
+                    <GridViewColumn Header="SV" DisplayMemberBinding="{Binding NumSv}" Width="50" />
+                    <GridViewColumn Header="Fix" DisplayMemberBinding="{Binding FixType}" Width="95" />
                 </GridView>
             </ListView.View>
         </ListView>
